@@ -1,0 +1,10 @@
+{
+  "name": "Mintlify Docs",
+  "install": "npm config set prefix \"$HOME/.npm-global\" && npm install -g mint",
+  "terminals": [
+    {
+      "name": "mint dev",
+      "command": "export PATH=\"$HOME/.npm-global/bin:$PATH\" && mint dev --no-open"
+    }
+  ]
+}
