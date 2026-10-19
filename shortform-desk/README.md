@@ -29,6 +29,17 @@ Four screens, one job each:
 
 Everything (including rejected ideas + reasons, all versions, an event log) is saved in `data/projects/<id>/project.json` (override with `DESK_DATA`).
 
+### 创意准则 (creative guidelines)
+
+`guidelines/创意准则.md` is Keven's iterable creative standard (v0.1 draft, distilled from 23 story-inspiration cards). The desk reads it on every generation (re-read when the file changes, override path with `DESK_GUIDELINES`):
+
+- **Prompts**: `desk/guidelines.py` builds a per-task digest injected as `{{guidelines}}` — ideas get the scoring questions, veto list, skeleton library and anti-patterns; outlines get skeleton beats; scripts get the visual technique library, the director-statement template and the single-variable variant rule.
+- **Ideas** carry `skeleton` (e.g. `S07`), `visual_anchor`, and cited `cards`.
+- **Story versions** carry `skeleton`, `director` (立意 / 视觉锚点 / 运镜·光色·节奏 / 核心假设 / 借鉴与边界 / 待补推断), `variants` (one variable each + falsifiable hypothesis) and optional `scores` against §1.
+- **Approval is blocked** until the director statement's 4 core fields and ≥1 complete single-variable variant exist. The approved `script.json` includes them plus the guidelines version/sha.
+- **UI**: header link 「创意准则 v0.1」 renders the file; idea cards show skeleton tags; the story screen has director / variant / scoring panels.
+- CLI: `python -m desk guidelines` (summary) or `--digest ideas|outline|script`.
+
 ### LLM provider
 
 Auto-picked from env (force with `DESK_LLM=openai|anthropic|mock`):
