@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import ideation as ide
 from . import llm_providers as llm
+from .util import run
 
 WEB = Path(__file__).resolve().parent / "web"
 _renders: dict[str, dict] = {}
@@ -27,7 +28,10 @@ def _render_job(pid: str) -> None:
     from .script import load_script
 
     try:
-        report = render(load_script(ide.script_path(pid)), ide.DATA / pid / "video.mp4", bgm="auto")
+        video = ide.DATA / pid / "video.mp4"
+        report = render(load_script(ide.script_path(pid)), video, bgm="auto")
+        run(["ffmpeg", "-y", "-ss", str(min(3.0, report["duration_sec"] / 2)), "-i", str(video),
+             "-frames:v", "1", "-vf", "scale=540:-1", str(video.with_name("poster.jpg"))])
         _renders[pid] = {"status": "done", "report": report}
     except Exception as e:  # surfaced to the UI
         _renders[pid] = {"status": "error", "error": str(e)[-800:]}
@@ -46,7 +50,7 @@ def route(method: str, pattern: str):
 @route("GET", "/api/status")
 def status(body):
     p = llm.provider()
-    return {"llm": p, "mock": p["name"] == "mock", "hint": SETUP_HINT if p["name"] == "mock" else ""}
+    return {"llm": p, "mock": p["name"] == "mock", "hint": SETUP_HINT if p["name"] == "mock" else "", "data": str(ide.DATA)}
 
 
 @route("GET", "/api/projects")
@@ -175,7 +179,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(404, {"error": "not found"})
 
     def _static(self, path: str) -> None:
-        m = re.match(r"^/files/(\w+)/(video\.mp4|script\.json)$", path)
+        m = re.match(r"^/files/(\w+)/(video\.mp4|poster\.jpg|script\.json)$", path)
         if m:
             f = ide.DATA / m.group(1) / m.group(2)
         else:

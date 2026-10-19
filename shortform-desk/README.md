@@ -14,6 +14,36 @@ Needs `ffmpeg`, Python 3.10+, a Chinese font (`fonts-noto-cjk` or `fonts-wqy-mic
 pip install -r requirements.txt
 ```
 
+## Web desk (ideas → story → approve)
+
+```bash
+python -m desk serve            # http://127.0.0.1:8787
+```
+
+Four screens, one job each:
+
+1. **简报** — topic (required), audience, tone, taboo, duration, up to 3 reference links/notes.
+2. **点子** — 10 candidates (hook / angle / format / why). Pick, star, reject (reason required), edit, 「更多类似」, 混搭两条, 再来 10 条. Stars and rejection reasons are fed into the next round's prompt.
+3. **故事** — 4-beat outline (钩子 → 转折 → 兑现 → CTA), edit any beat, rewrite one beat (optional note), expand to script + shot list, edit shots. Every AI rewrite is a new version; compare two versions side by side and switch.
+4. **批准** — human approves one version, which writes `data/projects/<id>/script.json` (`"approved": true`). Any later edit clears approval. Then 「现在渲染成片」 or run `desk render` on that file.
+
+Everything (including rejected ideas + reasons, all versions, an event log) is saved in `data/projects/<id>/project.json` (override with `DESK_DATA`).
+
+### LLM provider
+
+Auto-picked from env (force with `DESK_LLM=openai|anthropic|mock`):
+
+| Set | Uses |
+|---|---|
+| `OPENAI_API_KEY` | OpenAI (`OPENAI_MODEL`, default `gpt-4o-mini`) |
+| `OPENAI_API_KEY` + `OPENAI_BASE_URL` | any OpenAI-compatible API, e.g. DeepSeek `https://api.deepseek.com/v1` + `OPENAI_MODEL=deepseek-chat`; Qwen `https://dashscope.aliyuncs.com/compatible-mode/v1`; Moonshot `https://api.moonshot.cn/v1` |
+| `ANTHROPIC_API_KEY` | Anthropic (`ANTHROPIC_MODEL`, default `claude-sonnet-4-5`) |
+| nothing | **offline MOCK**: template output, labeled with a yellow banner in the UI. Demo only. |
+
+Prompts live in `prompts/*.md` (Chinese output, platform-neutral, `{{var}}` placeholders).
+
+Tests: `python -m unittest discover -s tests -t .`
+
 ## One command (sample)
 
 ```bash

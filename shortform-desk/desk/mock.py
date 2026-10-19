@@ -93,7 +93,7 @@ def script(beats: dict, idea: dict, brief: dict) -> dict:
              {"beat": "turn", "vo": beats["turn"], "screen_text": "问题不在努力", "visual": "人物停下动作，若有所思，光线变化"}]
     parts = [p for p in beats["payoff"].replace("；", "。").split("。") if p.strip()]
     for i, p in enumerate(parts[:4]):
-        shots.append({"beat": "payoff", "vo": p.strip() + "。", "screen_text": p.strip()[:8],
+        shots.append({"beat": "payoff", "vo": p.strip() + "。", "screen_text": p.strip().split("，")[-1][:10],
                       "visual": f"演示镜头 {i + 1}：具体动作的近景"})
     shots.append({"beat": "cta", "vo": beats["cta"], "screen_text": "你怎么看？", "visual": "人物看向镜头微笑，温暖色调"})
     return {"title": idea["hook"], "shots": shots}

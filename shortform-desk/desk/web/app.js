@@ -6,6 +6,7 @@ const STEPS = [["brief", "1 简报"], ["ideas", "2 点子"], ["story", "3 故事
 let P = null; // current project
 let ui = { tab: "all", remix: false, sel: [], editing: null, rejecting: null, cmp: null, noteFor: null };
 let pollTimer = null;
+let STATUS = { data: "data/projects" };
 
 async function api(method, url, body) {
   const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -265,7 +266,7 @@ function viewApprove() {
   const v = activeVersion();
   const approved = P.story.approved === v.id;
   const r = P.render;
-  const file = `data/projects/${P.id}/script.json`;
+  const file = `${STATUS.data}/${P.id}/script.json`;
   let html = `<h1>${approved ? "已批准" : "最后看一遍，再批准"}</h1>
     <p class="sub">${approved ? "这版脚本已交给渲染。改任何内容都会自动撤销批准。" : "批准后会生成给 desk render 用的 script.json。没批准不能渲染。"}</p>`;
   if (approved) html += `<div class="approved-banner">✓ v${v.n} 已批准 · ${esc(v.script.title)}</div>`;
@@ -278,7 +279,7 @@ function viewApprove() {
       <p>命令行：</p><pre>python -m desk render ${file} -o out/${P.id}.mp4 --bgm auto</pre>
       ${r && r.status === "running" ? `<p><b>渲染中…</b> 约 20-60 秒</p>` : ""}
       ${r && r.status === "error" ? `<p class="reason">渲染失败：${esc(r.error)}</p>` : ""}
-      ${r && r.status === "done" ? `<video src="/files/${P.id}/video.mp4?t=${Date.now()}" controls></video><p class="hint">${r.report.duration_sec}s · ${r.report.size} · 配音 ${r.report.tts.join(",")} · 画面 ${r.report.visual.join(",")}</p>` : ""}
+      ${r && r.status === "done" ? `<video src="/files/${P.id}/video.mp4?v=${P.updated}" poster="/files/${P.id}/poster.jpg?v=${P.updated}" controls preload="none"></video><p class="hint">${r.report.duration_sec}s · ${r.report.size} · 配音 ${r.report.tts.join(",")} · 画面 ${r.report.visual.join(",")}</p>` : ""}
     </div>`;
   }
   $("#app").innerHTML = html + actionbar(approved
@@ -320,7 +321,7 @@ async function route() {
 }
 
 (async function init() {
-  const s = await api("GET", "/api/status");
+  const s = (STATUS = await api("GET", "/api/status"));
   $("#llm").textContent = `模型：${s.llm.name} / ${s.llm.model}`;
   if (s.mock) { const m = $("#mock"); m.innerHTML = `<b>${esc(s.hint.split("\n")[0])}</b>\n${esc(s.hint.split("\n").slice(1).join("\n"))}`; m.classList.remove("hidden"); }
   window.addEventListener("hashchange", route);
