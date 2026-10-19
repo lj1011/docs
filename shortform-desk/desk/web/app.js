@@ -7,6 +7,17 @@ let P = null; // current project
 let ui = { tab: "all", remix: false, sel: [], editing: null, rejecting: null, cmp: null, noteFor: null };
 let pollTimer = null;
 let STATUS = { data: "data/projects" };
+let G = { skeletons: [], questions: [], thresholds: {}, director_fields: [], director_required: [], variant_fields: [], variant_required: [], version: "" };
+const skel = (id) => G.skeletons.find((s) => s.id === (id || "").toUpperCase());
+const skelLabel = (id) => { const s = skel(id); return s ? `${s.id} ${s.name}` : id ? `${id}（准则里没有）` : "未标骨架"; };
+function directorMissing(d) { d = d || {}; return G.director_fields.filter(([k]) => G.director_required.includes(k) && !(d[k] || "").trim()).map(([, l]) => l); }
+function variantProblems(vs) {
+  if (!vs || !vs.length) return ["至少要有 1 个单变量变体"];
+  const out = [];
+  vs.forEach((v, i) => { const miss = G.variant_fields.filter(([k]) => G.variant_required.includes(k) && !(v[k] || "").trim()).map(([, l]) => l); if (miss.length) out.push(`变体 ${i + 1} 缺：${miss.join("、")}`); });
+  return out;
+}
+const deliveryProblems = (v) => { const m = directorMissing(v.director); return [...(m.length ? [`导演阐述缺：${m.join("、")}`] : []), ...variantProblems(v.variants)]; };
 
 async function api(method, url, body) {
   const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -137,6 +148,7 @@ function ideaCard(i) {
   const cls = ["card", "idea", i.status === "picked" && "picked", i.starred && "starred", i.status === "rejected" && "rejected", ui.sel.includes(i.id) && "sel"].filter(Boolean).join(" ");
   const origin = i.origin.startsWith("more_like") ? "类似延伸" : i.origin.startsWith("remix") ? "混搭" : `第 ${i.round} 轮`;
   const tags = `<div class="tags"><span class="tag fmt">${esc(i.format)}</span><span class="tag">${origin}</span>
+    <span class="tag sk" title="${esc((skel(i.skeleton) || {}).mechanism || "")}">骨架 ${esc(skelLabel(i.skeleton))}</span>
     ${i.edited ? `<span class="tag">已改</span>` : ""}${i.starred ? `<span class="tag star">★ 加星</span>` : ""}${i.status === "picked" ? `<span class="tag pick">✓ 已选</span>` : ""}</div>`;
   if (ui.editing === i.id) {
     return `<div class="${cls}">${tags}
@@ -144,6 +156,8 @@ function ideaCard(i) {
       <label>角度</label><input id="e-angle" value="${esc(i.angle)}">
       <label>形式</label><input id="e-format" value="${esc(i.format)}">
       <label>为什么能火</label><input id="e-why" value="${esc(i.why)}">
+      <label>故事骨架</label><select id="e-skeleton"><option value="">未标骨架</option>${G.skeletons.map((s) => `<option value="${s.id}" ${s.id === i.skeleton ? "selected" : ""}>${esc(s.id + " " + s.name)}</option>`).join("")}</select>
+      <label>视觉锚点</label><input id="e-anchor" value="${esc(i.visual_anchor)}">
       <div class="acts"><button class="pri" onclick="saveEdit('${i.id}')">保存</button><button class="ghost" onclick="ui.editing=null;render()">取消</button></div></div>`;
   }
   const onclick = ui.remix && i.status !== "rejected" ? `onclick="toggleSel('${i.id}')"` : "";
@@ -162,7 +176,8 @@ function ideaCard(i) {
       <button class="danger" onclick="ui.rejecting='${i.id}';render()">拒绝</button></div>`;
   } else acts = "";
   return `<div class="${cls}" ${onclick}>${tags}<div class="hook">${esc(i.hook)}</div>
-    <div class="meta"><b>角度</b> ${esc(i.angle)}</div><div class="meta"><b>为什么能火</b> ${esc(i.why)}</div>${acts}</div>`;
+    <div class="meta"><b>角度</b> ${esc(i.angle)}</div><div class="meta"><b>视觉锚点</b> ${esc(i.visual_anchor || "待补")}</div>
+    <div class="meta"><b>为什么能火</b> ${esc(i.why)}${(i.cards || []).length ? ` <span class="cards">借鉴 ${esc(i.cards.join(" "))}</span>` : ""}</div>${acts}</div>`;
 }
 
 function setTab(t) { ui.tab = t; render(); }
@@ -171,7 +186,7 @@ function toggleSel(id) { ui.sel = ui.sel.includes(id) ? ui.sel.filter((x) => x !
 const ideaAct = (id, a, body) => act("保存…", () => api("POST", `/api/projects/${pid()}/ideas/${id}/${a}`, body || {}));
 async function doReject(id) { const reason = $("#reason").value; const r = await ideaAct(id, "reject", { reason }); if (r) ui.rejecting = null; render(); }
 async function saveEdit(id) {
-  const body = { hook: $("#e-hook").value, angle: $("#e-angle").value, format: $("#e-format").value, why: $("#e-why").value };
+  const body = { hook: $("#e-hook").value, angle: $("#e-angle").value, format: $("#e-format").value, why: $("#e-why").value, skeleton: $("#e-skeleton").value, visual_anchor: $("#e-anchor").value };
   ui.editing = null; await ideaAct(id, "edit", body);
 }
 const moreIdeas = () => { ui.tab = "all"; return act("结合你的星标和拒绝，再出 10 条…", () => api("POST", `/api/projects/${pid()}/ideas`, { count: 10 })); };
@@ -199,7 +214,13 @@ function viewStory() {
   }
   body += versionBar(versions, v);
   if (ui.cmp) body += compareView(versions);
-  body += `<div class="section"><h2>四拍大纲 <span class="hint">v${v.n} · ${esc(v.label)}</span></h2><div class="beats">
+  const sk = skel(v.skeleton);
+  body += `<div class="section"><h2>四拍大纲 <span class="hint">v${v.n} · ${esc(v.label)}</span></h2>
+    <div class="card skcard"><div class="row"><b>故事骨架</b><select onchange="saveSkeleton(this.value)" style="width:auto"><option value="">未标骨架</option>
+      ${G.skeletons.map((s) => `<option value="${s.id}" ${s.id === v.skeleton ? "selected" : ""}>${esc(s.id + " " + s.name)}</option>`).join("")}</select>
+      <a class="hint" href="#/guidelines">看《创意准则》骨架库 →</a></div>
+      ${sk ? `<div class="hint" style="margin-top:6px"><b>节拍</b> ${esc(sk.beats)}<br><b>卡片</b> ${esc(sk.cards_text)}</div>` : ""}</div>
+    <div class="beats">
     ${BEATS.map(([k, l, h]) => `<div class="card beat"><h3>${l} <span>${h}</span></h3>
       <textarea data-beat="${k}" onchange="saveBeat(this)" rows="3">${esc(v.beats[k])}</textarea>
       ${ui.noteFor === k
@@ -219,9 +240,53 @@ function viewStory() {
       </table><div class="row" style="margin-top:12px"><button onclick="genScript()">按当前大纲重写脚本（新版本）</button>
       <span class="hint">约 ${v.script.shots.reduce((n, s) => n + s.vo.length, 0)} 字 ≈ ${Math.round(v.script.shots.reduce((n, s) => n + s.vo.length, 0) / 4.5)} 秒</span></div></div></div>`;
   }
+  if (v.script) body += directorEditor(v) + variantEditor(v) + scorePanel(v);
+  const probs = v.script ? deliveryProblems(v) : [];
   $("#app").innerHTML = body + actionbar(`<button class="ghost" onclick="go('ideas')">← 换点子</button><span class="grow"></span>
-    ${v.script ? `<button class="pri big" onclick="go('approve')">去批准 →</button>` : `<span class="hint">先写出脚本，才能批准</span>`}`);
+    ${!v.script ? `<span class="hint">先写出脚本，才能批准</span>` : probs.length ? `<span class="reason">${esc(probs[0])}</span><button class="pri big" onclick="go('approve')">去批准 →</button>` : `<button class="pri big" onclick="go('approve')">去批准 →</button>`}`);
 }
+
+function directorEditor(v) {
+  const d = v.director || {};
+  const miss = directorMissing(d);
+  return `<div class="section"><h2>导演阐述 <span class="hint">《创意准则》要求每次故事交付必附${miss.length ? ` · <span class="reason">缺：${esc(miss.join("、"))}</span>` : " · ✓ 完整"}</span></h2>
+    <div class="card director">${G.director_fields.map(([k, l]) => `<label>${esc(l)}${G.director_required.includes(k) ? " <small>必填</small>" : ""}</label>
+      <textarea data-dir="${k}" rows="2" onchange="saveDirector()">${esc(d[k] || "")}</textarea>`).join("")}</div></div>`;
+}
+
+function variantEditor(v) {
+  const vs = v.variants || [];
+  const probs = variantProblems(vs);
+  return `<div class="section"><h2>单变量变体 <span class="hint">每个只改一个变量，附可证伪假设${probs.length ? ` · <span class="reason">${esc(probs.join("；"))}</span>` : " · ✓"}</span></h2>
+    <div class="card"><table><tr><th>#</th>${G.variant_fields.map(([, l]) => `<th>${esc(l)}</th>`).join("")}<th></th></tr>
+    ${vs.map((x, i) => `<tr data-var="${i}"><td class="n">${i + 1}</td>${G.variant_fields.map(([k]) => `<td><textarea data-vk="${k}" rows="2" onchange="saveVariants()">${esc(x[k] || "")}</textarea></td>`).join("")}
+      <td><button class="ghost" onclick="delVariant(${i})">删</button></td></tr>`).join("")}</table>
+    <div class="row" style="margin-top:10px"><button onclick="addVariant()">+ 加一个变体</button></div></div></div>`;
+}
+
+function scorePanel(v) {
+  const sc = v.scores || {};
+  const sum = v.score_summary || {};
+  const th = G.thresholds || {};
+  const line = (dim, label) => { const qs = G.questions.filter((q) => q.dim === dim); return `<h4>${label}</h4>${qs.map((q) => `<div class="qrow"><span class="qid">${q.id}</span><span class="grow">${esc(q.text.replace(/\*\*/g, ""))}</span>
+      ${[0, 1, 2].map((n) => `<button class="score ${sc[q.id] === n ? "on" : ""}" title="${esc(q.levels[n])}" onclick="setScore('${q.id}',${n})">${n}</button>`).join("")}</div>`).join("")}`; };
+  return `<div class="section"><h2>按准则打分 <span class="hint">可选；权重和及格线是 v0.1 提议，待 Keven 拍板</span></h2><div class="card">
+    <div class="row"><b>叙事 ${sum.narrative ?? 0}/${(th.narrative || [, 12])[1]}</b><b>视觉 ${sum.visual ?? 0}/${(th.visual || [, 14])[1]}</b><b>合计 ${sum.total ?? 0}/${(th.total || [, 26])[1]}</b>
+      <span class="hint">及格线：叙事 ≥${(th.narrative || ["?"])[0]}、视觉 ≥${(th.visual || ["?"])[0]}、合计 ≥${(th.total || ["?"])[0]}，N1 和 V1 ≥1 · 已答 ${sum.answered ?? 0}/${G.questions.length}</span>
+      <span class="tag ${sum.passed ? "pick" : ""}">${sum.passed ? "过线" : "未过线"}</span></div>
+    <div class="scores">${line("narrative", "叙事／策略")}${line("visual", "视觉")}</div></div></div>`;
+}
+
+const saveSkeleton = async (id) => { P = await api("PUT", `/api/projects/${pid()}/story`, { skeleton: id }); await reload(); toast("已保存"); };
+async function saveDirector() {
+  const director = {}; document.querySelectorAll("[data-dir]").forEach((el) => (director[el.dataset.dir] = el.value));
+  await api("PUT", `/api/projects/${pid()}/story`, { director }); await reload(); toast("已保存");
+}
+function readVariants() { return [...document.querySelectorAll("tr[data-var]")].map((tr) => { const o = {}; tr.querySelectorAll("[data-vk]").forEach((el) => (o[el.dataset.vk] = el.value)); return o; }); }
+async function saveVariants(list) { await api("PUT", `/api/projects/${pid()}/story`, { variants: list || readVariants() }); await reload(); toast("已保存"); }
+const addVariant = () => saveVariants([...readVariants(), { variable: "", change: "", hypothesis: "", falsify: "", metric: "待补" }]);
+const delVariant = (i) => saveVariants(readVariants().filter((_, j) => j !== i));
+async function setScore(q, n) { const scores = { ...(activeVersion().scores || {}), [q]: n }; await api("PUT", `/api/projects/${pid()}/story`, { scores }); await reload(); }
 
 const beatLabel = (k) => (BEATS.find((b) => b[0] === k) || [, k || "-"])[1];
 
@@ -273,6 +338,12 @@ function viewApprove() {
   html += `<div class="section card"><h2 style="margin-top:0">${esc(v.script.title)}</h2>
     <table><tr><th>#</th><th>拍</th><th>口播</th><th>画面大字</th></tr>
     ${v.script.shots.map((s, i) => `<tr><td class="n">${i + 1}</td><td><span class="tag">${esc(beatLabel(s.beat))}</span></td><td>${esc(s.vo)}</td><td>${esc(s.screen_text)}</td></tr>`).join("")}</table></div>`;
+  const d = v.director || {};
+  html += `<div class="section card"><h2 style="margin-top:0">导演阐述 <span class="hint">骨架 ${esc(skelLabel(v.skeleton))}</span></h2>
+    ${G.director_fields.map(([k, l]) => `<p><b>${esc(l)}</b>　${esc(d[k] || "（空）")}</p>`).join("")}
+    <h3>单变量变体</h3>${(v.variants || []).map((x, i) => `<p>${i + 1}. <b>${esc(x.variable)}</b>：${esc(x.change)}；假设：${esc(x.hypothesis)}；证伪：${esc(x.falsify)}；指标：${esc(x.metric || "待补")}</p>`).join("") || `<p class="reason">没有变体</p>`}
+    ${v.score_summary && v.score_summary.answered ? `<p class="hint">准则打分：叙事 ${v.score_summary.narrative} · 视觉 ${v.score_summary.visual} · 合计 ${v.score_summary.total}（${v.score_summary.passed ? "过线" : "未过线"}）</p>` : ""}
+  </div>`;
   if (approved) {
     html += `<div class="section card"><h2 style="margin-top:0">交给渲染</h2>
       <p>脚本文件：<code>${file}</code> · <a href="/files/${P.id}/script.json" target="_blank">打开</a></p>
@@ -284,13 +355,45 @@ function viewApprove() {
   }
   $("#app").innerHTML = html + actionbar(approved
     ? `<button class="ghost" onclick="unapprove()">撤销批准</button><span class="grow"></span><button class="pri big" onclick="startRender()" ${r && r.status === "running" ? "disabled" : ""}>现在渲染成片</button>`
-    : `<button class="ghost" onclick="go('story')">← 回去改</button><span class="grow"></span><button class="ok big" onclick="approve()">我看过了，批准这一版</button>`);
+    : deliveryProblems(v).length
+      ? `<button class="ghost" onclick="go('story')">← 回去补</button><span class="grow reason">不能批准：${esc(deliveryProblems(v).join("；"))}</span><button class="ok big" disabled>我看过了，批准这一版</button>`
+      : `<button class="ghost" onclick="go('story')">← 回去改</button><span class="grow"></span><button class="ok big" onclick="approve()">我看过了，批准这一版</button>`);
   if (r && r.status === "running") { clearTimeout(pollTimer); pollTimer = setTimeout(reload, 2500); }
 }
 
 const approve = () => act("批准…", () => api("POST", `/api/projects/${pid()}/approve`));
 const unapprove = () => act("撤销…", () => api("POST", `/api/projects/${pid()}/unapprove`));
 async function startRender() { await act("开始渲染…", () => api("POST", `/api/projects/${pid()}/render`)); await reload(); }
+
+// ---------- guidelines ----------
+
+function mdToHtml(md) {
+  const inline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>").replace(/(#\d\d)/g, '<span class="cardref">$1</span>');
+  const out = []; let table = null, list = false, code = null;
+  const flush = () => { if (table) { out.push(`<table class="md">${table.map((r, i) => `<tr>${r.map((c) => (i ? `<td>${inline(c)}</td>` : `<th>${inline(c)}</th>`)).join("")}</tr>`).join("")}</table>`); table = null; } if (list) { out.push("</ul>"); list = false; } };
+  for (const line of md.split("\n")) {
+    if (code !== null) { if (line.startsWith("```")) { out.push(`<pre>${esc(code)}</pre>`); code = null; } else code += line + "\n"; continue; }
+    if (line.startsWith("```")) { flush(); code = ""; continue; }
+    if (/^\|/.test(line)) { if (/^\|[-| ]+\|$/.test(line)) continue; (table = table || []).push(line.slice(1, -1).split(" | ").map((c) => c.trim())); continue; }
+    if (/^- /.test(line)) { if (table) flush(); if (!list) { out.push("<ul>"); list = true; } out.push(`<li>${inline(line.slice(2))}</li>`); continue; }
+    flush();
+    const h = line.match(/^(#{1,4}) (.*)$/);
+    if (h) out.push(`<h${h[1].length + 1}>${inline(h[2])}</h${h[1].length + 1}>`);
+    else if (line.startsWith("> ")) out.push(`<blockquote>${inline(line.slice(2))}</blockquote>`);
+    else if (line.trim() === "---") out.push("<hr>");
+    else if (line.trim()) out.push(`<p>${inline(line)}</p>`);
+  }
+  flush();
+  return out.join("");
+}
+
+async function viewGuidelines() {
+  renderSteps("");
+  const g = await api("GET", "/api/guidelines");
+  $("#app").innerHTML = `<div class="hint" style="margin-bottom:8px">文件：<code>${esc(g.path)}</code> · ${esc(g.version)} · sha ${esc(g.sha)} · 改文件后刷新即生效（下一次生成就会用新版本）</div>
+    <div class="card guide">${g.exists ? mdToHtml(g.markdown) : `<p class="reason">没找到准则文件</p>`}</div>
+    ${actionbar(`<button class="ghost" onclick="history.back()">← 返回</button><span class="grow"></span>`)}`;
+}
 
 // ---------- router ----------
 
@@ -312,6 +415,7 @@ function render() {
 async function route() {
   clearTimeout(pollTimer);
   const m = location.hash.match(/^#\/p\/(\w+)/);
+  if (location.hash === "#/guidelines") { try { await viewGuidelines(); window.scrollTo(0, 0); } catch (e) { toast(e.message, true); } return; }
   try {
     if (!m) return await viewHome();
     if (!P || P.id !== m[1]) { ui = { tab: "all", remix: false, sel: [], editing: null, rejecting: null, cmp: null, noteFor: null }; P = await api("GET", `/api/projects/${m[1]}`); }
@@ -322,6 +426,8 @@ async function route() {
 
 (async function init() {
   const s = (STATUS = await api("GET", "/api/status"));
+  G = await api("GET", "/api/guidelines");
+  $("#guide-link").textContent = `创意准则 ${G.version}`;
   $("#llm").textContent = `模型：${s.llm.name} / ${s.llm.model}`;
   if (s.mock) { const m = $("#mock"); m.innerHTML = `<b>${esc(s.hint.split("\n")[0])}</b>\n${esc(s.hint.split("\n").slice(1).join("\n"))}`; m.classList.remove("hidden"); }
   window.addEventListener("hashchange", route);

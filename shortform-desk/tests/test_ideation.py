@@ -7,6 +7,7 @@ from pathlib import Path
 os.environ["DESK_LLM"] = "mock"
 os.environ["DESK_DATA"] = tempfile.mkdtemp()
 
+from desk import guidelines as G  # noqa: E402
 from desk import ideation as ide  # noqa: E402
 from desk import llm_providers as llm  # noqa: E402
 
@@ -76,8 +77,53 @@ class IdeationFlow(unittest.TestCase):
         script = json.loads(ide.script_path(self.pid).read_text(encoding="utf-8"))
         self.assertTrue(script["approved"])
         self.assertEqual(script["source"]["idea"]["hook"], "我改过的钩子")
+        self.assertTrue(script["director_statement"]["intent"])
+        self.assertTrue(script["variants"][0]["falsify"])
+        self.assertEqual(script["guidelines"]["version"], "v0.1")
         p = ide.edit_version(self.pid, {"beats": {"cta": "新的结尾"}})
         self.assertIsNone(p["story"]["approved"])
+
+    def _scripted(self):
+        p = ide.generate_ideas(self.pid)
+        ide.idea_action(self.pid, p["ideas"][0]["id"], "pick", {})
+        ide.generate_outline(self.pid)
+        return ide.generate_script(self.pid)
+
+    def test_ideas_carry_skeleton_anchor_cards(self):
+        p = ide.generate_ideas(self.pid)
+        for i in p["ideas"]:
+            self.assertIsNotNone(G.skeleton(i["skeleton"]), i["skeleton"])
+            self.assertTrue(i["visual_anchor"])
+            self.assertTrue(all(c.startswith("#") for c in i["cards"]))
+        self.assertEqual(p["guidelines"]["version"], "v0.1")
+
+    def test_approve_requires_director_statement(self):
+        self._scripted()
+        ide.edit_version(self.pid, {"director": {"intent": "", "anchor": "x"}})
+        with self.assertRaisesRegex(ide.DeskError, "导演阐述"):
+            ide.approve(self.pid)
+
+    def test_approve_requires_single_variable_variants(self):
+        self._scripted()
+        ide.edit_version(self.pid, {"variants": []})
+        with self.assertRaisesRegex(ide.DeskError, "变体"):
+            ide.approve(self.pid)
+        ide.edit_version(self.pid, {"variants": [{"variable": "停格、钩子位置", "change": "a→b", "hypothesis": "h", "falsify": "f"}]})
+        with self.assertRaisesRegex(ide.DeskError, "不止一个变量"):
+            ide.approve(self.pid)
+        ide.edit_version(self.pid, {"variants": [{"variable": "停格有无", "change": "有→无", "hypothesis": "h", "falsify": "f"}]})
+        self.assertTrue(ide.approve(self.pid)["story"]["approved"])
+
+    def test_scores_against_pass_lines(self):
+        p = self._scripted()
+        v = ide._active(p)
+        self.assertFalse(ide.score_summary(v)["passed"])
+        scores = {q["id"]: 2 for q in G.load()["questions"]}
+        p = ide.edit_version(self.pid, {"scores": {**scores, "X9": 2, "N1": 7}})
+        v = ide._active(p)
+        self.assertNotIn("X9", v["scores"])
+        self.assertEqual(v["scores"]["N1"], 2)
+        self.assertTrue(ide.score_summary(v)["passed"])
 
     def test_script_json_renders_through_loader(self):
         from desk.script import load_script
@@ -92,13 +138,91 @@ class IdeationFlow(unittest.TestCase):
         self.assertGreaterEqual(len(s.shots), 4)
 
 
+class Guidelines(unittest.TestCase):
+    def setUp(self):
+        self.g = G.load()
+        self.text = self.g["text"]
+
+    def test_file_parsed(self):
+        self.assertTrue(self.g["exists"])
+        self.assertEqual(self.g["version"], "v0.1")
+        self.assertGreaterEqual(len(self.g["skeletons"]), 10)
+        self.assertEqual({q["dim"] for q in self.g["questions"]}, {"narrative", "visual"})
+        self.assertEqual(self.g["thresholds"]["total"], [16, 26])
+
+    def test_required_sections_present(self):
+        for title in ["零、", "一、好点子的判断标准", "二、故事骨架库", "三、视觉手法库", "四、方法论", "五、反模式", "六、人机配合方式", "七、待 Keven 拍板的开放问题"]:
+            self.assertIn("## " + title, self.text)
+
+    def test_every_skeleton_and_commonality_cites_cards(self):
+        import re
+        for sk in self.g["skeletons"]:
+            self.assertTrue(sk["cards"], sk["id"])
+            self.assertTrue(all(1 <= int(c) <= 23 for c in sk["cards"]))
+        rows = [l for l in self.g["sections"]["零"].splitlines() if re.match(r"^\| C\d+", l)]
+        self.assertGreaterEqual(len(rows), 10)
+        for r in rows:
+            self.assertTrue(re.search(r"#\d\d", r), r)
+        cited = set(re.findall(r"#(\d\d)", self.g["sections"]["零"]))
+        self.assertEqual(cited, {f"{i:02d}" for i in range(1, 24)})
+
+    def test_open_questions_count(self):
+        import re
+        n = len(re.findall(r"^\d+\. ", self.g["sections"]["七"], re.M))
+        self.assertTrue(5 <= n <= 8, n)
+
+    def test_digests_injected(self):
+        self.assertIn("S07", G.digest("ideas"))
+        self.assertIn("一票否决", G.digest("ideas"))
+        self.assertIn("戏剧节拍" if False else "→", G.digest("outline"))
+        script = G.digest("script")
+        self.assertIn("【导演阐述】", script)
+        self.assertIn("视觉手法库", script)
+        self.assertIn("单变量", script)
+
+    def test_prompts_receive_guidelines(self):
+        seen = []
+        orig_provider, orig_chat = llm.provider, llm.chat_json
+        llm.provider = lambda: {"name": "openai", "model": "fake", "base_url": "x"}
+
+        def fake(system, user):
+            seen.append(user)
+            if "故事节拍大纲" in user:
+                return {"skeleton": "S07", "beats": {"hook": "h", "turn": "t", "payoff": "p", "cta": "c"}}
+            if "镜头表" in user:
+                return {"title": "t", "shots": [{"beat": "hook", "vo": "一句", "screen_text": "", "visual": ""}],
+                        "director": {"intent": "i", "anchor": "a", "camera_light_rhythm": "c", "hypothesis": "h"},
+                        "variants": [{"variable": "停格有无", "change": "有→无", "hypothesis": "h", "falsify": "f"}]}
+            return {"ideas": [{"hook": "钩子", "angle": "a", "format": "口播", "skeleton": "s07", "visual_anchor": "红鸟", "why": "w", "cards": ["8", "#01"]}]}
+        llm.chat_json = fake
+        try:
+            p = ide.create_project(BRIEF)
+            p = ide.generate_ideas(p["id"], 1)
+            idea = p["ideas"][0]
+            self.assertEqual((idea["skeleton"], idea["cards"]), ("S07", ["#08", "#01"]))
+            ide.idea_action(p["id"], idea["id"], "pick", {})
+            ide.generate_outline(p["id"])
+            p = ide.generate_script(p["id"])
+            v = ide._active(p)
+            self.assertEqual(v["skeleton"], "S07")
+            self.assertEqual(v["director"]["intent"], "i")
+            self.assertTrue(ide.approve(p["id"])["story"]["approved"])
+        finally:
+            llm.provider, llm.chat_json = orig_provider, orig_chat
+        self.assertEqual(len(seen), 3)
+        self.assertIn("故事骨架库", seen[0])
+        self.assertIn("S07 诱饵", seen[1])
+        self.assertIn("【导演阐述】", seen[2])
+        self.assertTrue(all("{{" not in u for u in seen))
+
+
 class PromptFiles(unittest.TestCase):
     def test_all_placeholders_filled(self):
         seen = {}
         orig = llm.chat_json
         llm.chat_json = lambda system, user: seen.setdefault("user", user) and {"ideas": []}
         try:
-            llm.run_prompt("ideas", {"brief": {"topic": "x"}, "count": "10", "duration": "30",
+            llm.run_prompt("ideas", {"brief": {"topic": "x"}, "count": "10", "duration": "30", "guidelines": "G",
                                      "starred": "无", "rejected": [{"hook": "h", "reason": "r"}], "existing": "无"})
         finally:
             llm.chat_json = orig

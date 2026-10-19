@@ -1,5 +1,7 @@
 根据 brief 发散 {{count}} 条短视频点子。
 
+{{guidelines}}
+
 brief：
 {{brief}}
 
@@ -10,8 +12,11 @@ brief：
 
 要求：
 - format 只能取：口播、清单、对比、反转、演示、故事。{{count}} 条里至少覆盖 4 种。
+- skeleton 填《创意准则》故事骨架库的编号（如 S07）；{{count}} 条里至少用到 5 个不同骨架。
 - hook 是前 3 秒说出口的那一句，≤ 20 字，要让人停下来。
-- angle 一句话说切入角度；why 一句话说为什么能被看完/被转发。
+- angle 一句话说切入角度，最好能看出这条片的「规则或问题」。
+- visual_anchor 一句话写全片唯一的视觉锚点。
+- why 一句话说为什么能被看完/被转发；cards 写借鉴的灵感卡号。
 - 适配时长 {{duration}} 秒。
 
-输出：{"ideas":[{"hook":"","angle":"","format":"","why":""}]}
+输出：{"ideas":[{"hook":"","angle":"","format":"","skeleton":"S01","visual_anchor":"","why":"","cards":["#01"]}]}

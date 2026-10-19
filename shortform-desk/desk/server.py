@@ -8,6 +8,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import guidelines as G
 from . import ideation as ide
 from . import llm_providers as llm
 from .util import run
@@ -53,6 +54,14 @@ def status(body):
     return {"llm": p, "mock": p["name"] == "mock", "hint": SETUP_HINT if p["name"] == "mock" else "", "data": str(ide.DATA)}
 
 
+@route("GET", "/api/guidelines")
+def guidelines(body):
+    g = G.load()
+    return {**G.meta(), "exists": g["exists"], "skeletons": g["skeletons"], "questions": g["questions"],
+            "thresholds": g["thresholds"], "director_fields": G.DIRECTOR_FIELDS, "director_required": G.DIRECTOR_REQUIRED,
+            "variant_fields": G.VARIANT_FIELDS, "variant_required": G.VARIANT_REQUIRED, "markdown": g["text"]}
+
+
 @route("GET", "/api/projects")
 def projects(body):
     return {"projects": ide.list_projects()}
@@ -67,6 +76,8 @@ def create(body):
 def get(body, pid):
     p = ide.load(pid)
     p["render"] = _renders.get(pid)
+    for v in p["story"]["versions"]:
+        v["score_summary"] = ide.score_summary(v)
     return p
 
 

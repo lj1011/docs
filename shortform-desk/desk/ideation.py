@@ -1,22 +1,25 @@
 """Human-in-the-loop idea + story module. One JSON file per project under $DESK_DATA (default ./data/projects).
 
 Flow: brief -> ideas (pick/star/reject/edit/more-like/remix) -> beats -> script versions -> human approves -> script.json for `desk render`.
+Every prompt carries a digest of guidelines/创意准则.md; approval requires a director statement + single-variable variants.
 """
 
 import json
 import os
+import re
 import threading
 import time
 import uuid
 from pathlib import Path
 
+from . import guidelines as G
 from . import llm_providers as llm
 from . import mock
 
 DATA = Path(os.environ.get("DESK_DATA", Path(__file__).resolve().parent.parent / "data" / "projects"))
 BEATS = [("hook", "钩子"), ("turn", "转折"), ("payoff", "兑现"), ("cta", "收尾 CTA")]
 BEAT_LABEL = dict(BEATS)
-IDEA_FIELDS = ("hook", "angle", "format", "why")
+IDEA_FIELDS = ("hook", "angle", "format", "why", "skeleton", "visual_anchor")
 _lock = threading.RLock()
 
 
@@ -92,6 +95,7 @@ def create_project(brief: dict) -> dict:
         "id": _id(), "created": _now(), "updated": _now(), "step": "ideas",
         "brief": clean_brief(brief), "ideas": [], "rounds": 0, "picked": None,
         "story": {"versions": [], "active": None, "approved": None}, "log": [],
+        "guidelines": G.meta(),
     }
     with _lock:
         return save(p)
@@ -128,6 +132,8 @@ def _add_ideas(p: dict, raw: list[dict], origin: str) -> list[dict]:
         idea = {k: str(r.get(k, "")).strip() for k in IDEA_FIELDS}
         if not idea["hook"]:
             continue
+        idea["skeleton"] = idea["skeleton"].upper()
+        idea["cards"] = _cards(r.get("cards"))
         idea.update(id=_id(), round=p["rounds"], origin=origin, status="new", starred=False,
                     reject_reason="", edited=False, created=_now())
         p["ideas"].append(idea)
@@ -143,8 +149,19 @@ def _idea(p: dict, iid: str) -> dict:
     raise DeskError("idea not found")
 
 
+def _cards(raw) -> list[str]:
+    if isinstance(raw, str):
+        raw = re.findall(r"#?\d{1,2}", raw)
+    out = []
+    for c in raw or []:
+        n = re.sub(r"\D", "", str(c))
+        if n and f"#{int(n):02d}" not in out:
+            out.append(f"#{int(n):02d}")
+    return out
+
+
 def _public(i: dict) -> dict:
-    return {k: i[k] for k in IDEA_FIELDS}
+    return {**{k: i.get(k, "") for k in IDEA_FIELDS}, "cards": i.get("cards", [])}
 
 
 def generate_ideas(pid: str, count: int = 10) -> dict:
@@ -155,7 +172,8 @@ def generate_ideas(pid: str, count: int = 10) -> dict:
         existing = {i["hook"] for i in p["ideas"]}
         raw = mock.ideas(p["brief"], count, existing, seed=p["rounds"] + len(p["ideas"]))
     else:
-        raw = llm.run_prompt("ideas", {"brief": _brief_text(p), "count": str(count), "duration": str(p["brief"]["duration_sec"]), **fb})["ideas"]
+        raw = llm.run_prompt("ideas", {"brief": _brief_text(p), "count": str(count), "duration": str(p["brief"]["duration_sec"]),
+                                       "guidelines": G.digest("ideas"), **fb})["ideas"]
     with _lock:
         p = load(pid)
         _add_ideas(p, raw, "fresh")
@@ -171,7 +189,7 @@ def more_like(pid: str, iid: str, count: int = 3) -> dict:
     if llm.provider()["name"] == "mock":
         raw = mock.more_like(src, count, seed=len(p["ideas"]))
     else:
-        raw = llm.run_prompt("more_like", {"idea": _public(src), "brief": _brief_text(p), "count": str(count),
+        raw = llm.run_prompt("more_like", {"idea": _public(src), "brief": _brief_text(p), "count": str(count), "guidelines": G.digest("ideas"),
                                            "rejected": fb["rejected"], "existing": fb["existing"]})["ideas"]
     with _lock:
         p = load(pid)
@@ -189,7 +207,7 @@ def remix(pid: str, a: str, b: str, count: int = 2) -> dict:
     if llm.provider()["name"] == "mock":
         raw = mock.remix(ia, ib, count)
     else:
-        raw = llm.run_prompt("remix", {"a": _public(ia), "b": _public(ib), "brief": _brief_text(p), "count": str(count),
+        raw = llm.run_prompt("remix", {"a": _public(ia), "b": _public(ib), "brief": _brief_text(p), "count": str(count), "guidelines": G.digest("ideas"),
                                        "rejected": _feedback(p)["rejected"]})["ideas"]
     with _lock:
         p = load(pid)
@@ -248,10 +266,13 @@ def _active(p: dict) -> dict:
     raise DeskError("还没有大纲，先生成大纲")
 
 
-def _new_version(p: dict, beats: dict, script: dict | None, label: str, base: dict | None = None) -> dict:
+def _new_version(p: dict, beats: dict, script: dict | None, label: str, base: dict | None = None,
+                 skeleton: str = "", director: dict | None = None, variants: list | None = None) -> dict:
     st = p["story"]
     v = {"id": _id(), "n": len(st["versions"]) + 1, "idea": p["picked"], "label": label, "created": _now(),
-         "beats": beats, "script": script, "llm": llm.provider()["name"], "parent": base["id"] if base else None}
+         "beats": beats, "script": script, "llm": llm.provider()["name"], "parent": base["id"] if base else None,
+         "skeleton": skeleton or (base or {}).get("skeleton", ""), "director": director, "variants": variants,
+         "scores": {}, "guidelines": G.meta()}
     st["versions"].append(v)
     st["active"] = v["id"]
     st["approved"] = None
@@ -263,15 +284,17 @@ def generate_outline(pid: str) -> dict:
     with _lock:
         p = load(pid)
         idea = _picked(p)
+    skeleton = idea.get("skeleton", "")
     if llm.provider()["name"] == "mock":
         beats = mock.outline(idea, p["brief"], variant=len(p["story"]["versions"]))
     else:
-        beats = llm.run_prompt("outline", {"idea": _public(idea), "brief": _brief_text(p),
-                                           "duration": str(p["brief"]["duration_sec"])})["beats"]
+        res = llm.run_prompt("outline", {"idea": _public(idea), "brief": _brief_text(p), "guidelines": G.digest("outline"),
+                                         "duration": str(p["brief"]["duration_sec"])})
+        beats, skeleton = res["beats"], str(res.get("skeleton") or skeleton).upper()
     beats = {k: str(beats.get(k, "")).strip() for k, _ in BEATS}
     with _lock:
         p = load(pid)
-        _new_version(p, beats, None, "新大纲")
+        _new_version(p, beats, None, "新大纲", skeleton=skeleton)
         return save(p)
 
 
@@ -287,6 +310,7 @@ def regen_beat(pid: str, key: str, note: str = "") -> dict:
         text = mock.beat(key, idea, p["brief"], variant)
     else:
         text = llm.run_prompt("beat", {"beat_label": BEAT_LABEL[key], "beats": base["beats"], "current": base["beats"][key],
+                                       "skeleton": base.get("skeleton") or "未指定",
                                        "note": note or "无", "brief": _brief_text(p)})["text"]
     with _lock:
         p = load(pid)
@@ -305,10 +329,12 @@ def generate_script(pid: str) -> dict:
         raise DeskError("四拍都要有内容才能写脚本")
     dur = p["brief"]["duration_sec"]
     if llm.provider()["name"] == "mock":
-        script = mock.script(base["beats"], idea, p["brief"])
+        script = mock.script(base["beats"], idea, p["brief"], G.skeleton(base.get("skeleton", "")))
     else:
         script = llm.run_prompt("script", {"beats": base["beats"], "idea": _public(idea), "brief": _brief_text(p),
-                                           "duration": str(dur), "chars": str(int(dur * 4.5))})
+                                           "guidelines": G.digest("script"), "duration": str(dur), "chars": str(int(dur * 4.5))})
+    director = _clean_director(script.get("director"))
+    variants = _clean_variants(script.get("variants"))
     shots = [{"beat": s.get("beat", ""), "vo": str(s.get("vo", "")).strip(), "screen_text": str(s.get("screen_text", "")).strip(),
               "visual": str(s.get("visual", "")).strip()} for s in script.get("shots", []) if str(s.get("vo", "")).strip()]
     if not shots:
@@ -318,10 +344,12 @@ def generate_script(pid: str) -> dict:
         base = _active(p)
         if base["script"] is None:
             base["script"] = {"title": script.get("title") or idea["hook"], "shots": shots}
+            base.update(director=director, variants=variants)
             base["label"] += " + 脚本"
             p["story"]["approved"] = None
         else:
-            _new_version(p, dict(base["beats"]), {"title": script.get("title") or idea["hook"], "shots": shots}, "重写脚本", base)
+            _new_version(p, dict(base["beats"]), {"title": script.get("title") or idea["hook"], "shots": shots}, "重写脚本", base,
+                         director=director, variants=variants)
         return save(p)
 
 
@@ -342,6 +370,15 @@ def edit_version(pid: str, payload: dict) -> dict:
                 v["script"]["shots"] = [{"beat": x.get("beat", ""), "vo": str(x.get("vo", "")).strip(),
                                          "screen_text": str(x.get("screen_text", "")).strip(),
                                          "visual": str(x.get("visual", "")).strip()} for x in s["shots"] if str(x.get("vo", "")).strip()]
+        if "director" in payload:
+            v["director"] = _clean_director(payload["director"])
+        if "variants" in payload:
+            v["variants"] = _clean_variants(payload["variants"])
+        if "skeleton" in payload:
+            v["skeleton"] = str(payload["skeleton"]).strip().upper()
+        if "scores" in payload:
+            v["scores"] = {k: max(0, min(2, int(x))) for k, x in payload["scores"].items()
+                           if re.fullmatch(r"[NV]\d+", k) and str(x).lstrip("-").isdigit()}
         v["edited"] = True
         p["story"]["approved"] = None
         return save(p)
@@ -363,10 +400,18 @@ def approve(pid: str) -> dict:
         v = _active(p)
         if not v["script"] or not v["script"]["shots"]:
             raise DeskError("这个版本还没有脚本，不能批准")
+        missing = G.director_missing(v.get("director"))
+        if missing:
+            raise DeskError(f"《创意准则》要求每次故事交付附导演阐述，缺：{'、'.join(missing)}")
+        problems = G.variants_problems(v.get("variants"))
+        if problems:
+            raise DeskError("单变量变体不完整：" + "；".join(problems))
         p["story"]["approved"] = v["id"]
         p["step"] = "approve"
         out = {"title": v["script"]["title"], "platform": "neutral", "approved": True,
-               "source": {"project": pid, "version": v["n"], "idea": _public(_picked(p))},
+               "source": {"project": pid, "version": v["n"], "idea": _public(_picked(p)), "skeleton": v.get("skeleton", "")},
+               "director_statement": v["director"], "variants": v["variants"], "scores": v.get("scores", {}),
+               "guidelines": G.meta(),
                "shots": [{"vo": s["vo"], "screen_text": s["screen_text"], "visual": s["visual"]} for s in v["script"]["shots"]]}
         (DATA / pid / "script.json").write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
         p["log"].append({"t": _now(), "event": "approve", "version": v["n"]})
@@ -380,6 +425,38 @@ def unapprove(pid: str) -> dict:
         p["step"] = "story"
         (DATA / pid / "script.json").unlink(missing_ok=True)
         return save(p)
+
+
+def _clean_director(d) -> dict:
+    d = d if isinstance(d, dict) else {}
+    return {k: str(d.get(k, "")).strip() for k, _ in G.DIRECTOR_FIELDS}
+
+
+def _clean_variants(vs) -> list[dict]:
+    out = []
+    for v in vs if isinstance(vs, list) else []:
+        if isinstance(v, dict):
+            row = {k: str(v.get(k, "")).strip() for k, _ in G.VARIANT_FIELDS}
+            if any(row.values()):
+                out.append(row)
+    return out
+
+
+def score_summary(v: dict) -> dict:
+    """Totals vs the pass lines in 创意准则 §1.4 (proposal; weights pending Keven)."""
+    g = G.load()
+    scores = v.get("scores") or {}
+    qs = g["questions"]
+    n = sum(scores.get(q["id"], 0) for q in qs if q["dim"] == "narrative")
+    vis = sum(scores.get(q["id"], 0) for q in qs if q["dim"] == "visual")
+    th = g["thresholds"]
+    answered = sum(1 for q in qs if q["id"] in scores)
+
+    def ok(val, key):
+        return th.get(key) is None or val >= th[key][0]
+
+    passed = ok(n, "narrative") and ok(vis, "visual") and ok(n + vis, "total") and scores.get("N1", 0) >= 1 and scores.get("V1", 0) >= 1
+    return {"narrative": n, "visual": vis, "total": n + vis, "answered": answered, "questions": len(qs), "passed": passed, "thresholds": th}
 
 
 def script_path(pid: str) -> Path:

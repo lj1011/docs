@@ -36,6 +36,9 @@ def main(argv=None) -> None:
 
     sub.add_parser("platforms", help="list format packs")
 
+    g = sub.add_parser("guidelines", help="show 创意准则 summary or the prompt digest for a task")
+    g.add_argument("--digest", choices=["ideas", "outline", "script"])
+
     s = sub.add_parser("serve", help="local web desk: brief -> ideas -> story -> approve")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8787)
@@ -68,6 +71,17 @@ def main(argv=None) -> None:
         report = render(script, Path(args.out), platform_id=args.platform, tts_name=args.tts,
                         visual_name=args.visual, bgm=args.bgm)
         print(json.dumps(report, ensure_ascii=False, indent=2))
+    elif args.cmd == "guidelines":
+        from . import guidelines as G
+
+        if args.digest:
+            print(G.digest(args.digest))
+        else:
+            data = G.load()
+            print(f"{data['path']}  {data['version']}  sha={data['sha']}")
+            print(f"skeletons: {len(data['skeletons'])}  questions: {len(data['questions'])}  pass lines: {data['thresholds']}")
+            for sk in data["skeletons"]:
+                print(f"  {sk['id']} {sk['name']}  cards: {' '.join('#' + c for c in sk['cards'])}")
     elif args.cmd == "serve":
         from .server import serve
 
