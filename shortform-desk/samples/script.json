@@ -1,0 +1,38 @@
+{
+  "title": "三个动作，闹钟一响就起床",
+  "platform": "neutral",
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "approved": true,
+  "shots": [
+    {
+      "vo": "闹钟响了五次你还没起？别怪自己，问题可能不在意志力。",
+      "screen_text": "闹钟响了5次\n还没起？",
+      "visual": "清晨卧室，手机闹钟在床头亮着，被子里伸出一只手",
+      "palette": "night"
+    },
+    {
+      "vo": "第一，把闹钟放到离床三步远的地方，想关掉它，你就得先站起来。",
+      "screen_text": "①闹钟放远\n三步",
+      "visual": "闹钟放在房间另一头的书桌上",
+      "palette": "sunset"
+    },
+    {
+      "vo": "第二，一起床就拉开窗帘，让光照进来，人会清醒得更快。",
+      "screen_text": "②拉开窗帘\n见光",
+      "visual": "窗帘被拉开，阳光洒进房间",
+      "palette": "sky"
+    },
+    {
+      "vo": "第三，给早晨留一个小奖励，比如一杯喜欢的咖啡，让起床有点盼头。",
+      "screen_text": "③留个\n小奖励",
+      "visual": "桌上一杯冒热气的咖啡",
+      "palette": "peach"
+    },
+    {
+      "vo": "你最常用的起床办法是什么？评论区告诉我，明天一起早起。",
+      "screen_text": "你靠什么\n起床？",
+      "visual": "评论气泡图标，温暖色调",
+      "palette": "grape"
+    }
+  ]
+}
