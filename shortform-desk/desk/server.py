@@ -59,7 +59,8 @@ def guidelines(body):
     g = G.load()
     return {**G.meta(), "exists": g["exists"], "skeletons": g["skeletons"], "questions": g["questions"],
             "thresholds": g["thresholds"], "director_fields": G.DIRECTOR_FIELDS, "director_required": G.DIRECTOR_REQUIRED,
-            "variant_fields": G.VARIANT_FIELDS, "variant_required": G.VARIANT_REQUIRED, "markdown": g["text"]}
+            "variant_fields": G.VARIANT_FIELDS, "variant_required": G.VARIANT_REQUIRED,
+            "project_types": G.PROJECT_TYPES, "default_metric": G.DEFAULT_METRIC, "markdown": g["text"]}
 
 
 @route("GET", "/api/projects")

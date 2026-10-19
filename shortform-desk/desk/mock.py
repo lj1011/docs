@@ -123,17 +123,19 @@ def script(beats: dict, idea: dict, brief: dict, skeleton: dict | None = None) -
     sk = f"{skeleton['id']} {skeleton['name']}" if skeleton else "未指定骨架"
     cards = "、".join(idea.get("cards") or []) or "待补"
     director = {
-        "intent": f"让观众相信：{idea['angle']}。规则一句话：{idea['hook']}（推断，离线模板生成）",
-        "anchor": f"{anchor}；在第 1、{len(shots) // 2 + 1}、{len(shots)} 镜出现。",
-        "camera_light_rhythm": "开场近景压迫，转折处机位不动只换环境；色板限 3 色；兑现段每镜一个动作，CTA 前停格 1 秒（推断）。",
-        "hypothesis": f"骨架 {sk} 能让 {brief.get('duration_sec', 30)} 秒内完成「问题→反转→兑现」；如果盲评觉得转折不成立，先改转折这一拍。",
-        "borrowed": f"借 {cards} 的机制，只借结构；不借原片音乐、HUD、画面。",
-        "unknowns": "品牌信息、配乐、表现数据：待补。本阐述由离线模板生成，接入模型后会更具体。",
+        "intent": f"我想让观众相信：{idea['angle']}。我给这条片定的规则是：{idea['hook']}（推断，离线模板生成）。",
+        "anchor": f"我选的唯一视觉锚点是：{anchor}。它在开场、转折和结尾都会出现，让观众一眼认出这是同一个故事。",
+        "camera_light_rhythm": "我开场用近景制造压迫感，转折处让机位不动、只换环境；色板我限制在 3 色以内；兑现段我让每镜只做一个动作，CTA 前停格 1 秒留一口气（推断）。",
+        "hypothesis": f"我赌的是骨架 {sk} 能在 {brief.get('duration_sec', 30)} 秒内完成「问题→反转→兑现」；如果 Keven 觉得转折不成立，我先改转折这一拍。",
+        "borrowed": f"我借了 {cards} 的机制，只借结构；不借原片音乐、HUD、画面。",
+        "unknowns": "我还不知道品牌信息、配乐，这些待补。这份阐述由离线模板生成，接入模型后会更具体。",
     }
     variants = [
         {"variable": "停格有无", "change": "从「CTA 前停格 1 秒」改成「不停格」",
-         "hypothesis": "去掉停格后完播率不变或下降", "falsify": "若去掉停格后完播率明显上升，则「停格有用」不成立", "metric": "完播率（待 Keven 确认）"},
+         "hypothesis": "去掉停格后结尾显得仓促，Keven 会更喜欢有停格的版本", "falsify": "如果 Keven 认为不停格的版本更好或一样好，「停格有用」不成立",
+         "metric": "Keven 审美判断（过稿与否）"},
         {"variable": "钩子位置", "change": "从「顺叙」改成「结果前置到前 3 秒」",
-         "hypothesis": "结果前置后 3 秒留存上升", "falsify": "若 3 秒留存没有上升，则假设不成立", "metric": "3 秒留存（待补）"},
+         "hypothesis": "结果前置后开场更抓人，Keven 更可能过稿", "falsify": "如果 Keven 认为前置版本不比顺叙版本好，假设不成立",
+         "metric": "Keven 审美判断（过稿与否）"},
     ]
     return {"title": idea["hook"], "shots": shots, "director": director, "variants": variants}

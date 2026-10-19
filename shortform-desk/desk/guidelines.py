@@ -32,6 +32,16 @@ VARIANT_FIELDS = [
     ("metric", "指标"),
 ]
 VARIANT_REQUIRED = ["variable", "change", "hypothesis", "falsify"]
+DEFAULT_METRIC = "Keven 审美判断（过稿与否）"
+
+# Keven 2026-10-19: no default brand; every project is either a brand film or an original story.
+PROJECT_TYPES = {"original": "自创故事", "brand": "品牌片"}
+# Banned in both project types (创意准则 A2 / 1.3).
+VIOLENCE_CLOSEUP_TERMS = ["刀刃抵喉", "刀抵喉", "割喉", "斩击特写", "斩首", "砍头"]
+# Banned only in brand films (创意准则 A14 / 1.3): dark, horror, violence-adjacent tone.
+# Keyword matching is a coarse safety net; the human reviewer still decides.
+DARK_TONE_TERMS = ["惊悚", "恐怖", "惊吓", "血腥", "鲜血", "流血", "喷血", "血迹", "尸体", "杀人", "谋杀", "凶杀",
+                   "开颅", "黑色幽默", "暗黑", "打斗", "厮杀", "斩杀", "暴力", "虐待", "自残", "鬼魂", "诅咒"]
 
 _cache: dict = {}
 
@@ -131,7 +141,7 @@ def _subsection(sec: str, title_prefix: str) -> str:
     return m.group(0).strip() if m else ""
 
 
-def digest(task: str, limit: int = 6000) -> str:
+def digest(task: str, ptype: str | None = None, limit: int = 6500) -> str:
     """Compact, task-specific excerpt of the guidelines for prompt injection."""
     g = load()
     if not g["exists"]:
@@ -140,7 +150,7 @@ def digest(task: str, limit: int = 6000) -> str:
     sk = g["skeletons"]
     qs = g["questions"]
     secs = g["sections"]
-    parts = [head]
+    parts = [head, stance(task, ptype)]
     if task in ("ideas", "outline"):
         parts.append("【判断标准：每题 0/1/2 分】\n" + "\n".join(f"{q['id']} {q['text']}" for q in qs))
         veto = _subsection(secs.get("一", ""), "1.3")
@@ -168,6 +178,50 @@ def digest(task: str, limit: int = 6000) -> str:
 def director_missing(d: dict | None) -> list[str]:
     d = d or {}
     return [label for key, label in DIRECTOR_FIELDS if key in DIRECTOR_REQUIRED and not str(d.get(key, "")).strip()]
+
+
+def director_problems(d: dict | None) -> list[str]:
+    """Required fields present and written in first person (Keven 2026-10-19: paragraph-level, 「我……」)."""
+    d = d or {}
+    missing = director_missing(d)
+    probs = [f"导演阐述缺：{'、'.join(missing)}"] if missing else []
+    not_first = [label for key, label in DIRECTOR_FIELDS
+                 if key in DIRECTOR_REQUIRED and str(d.get(key, "")).strip() and "我" not in str(d.get(key, ""))]
+    if not_first:
+        probs.append(f"导演阐述要用第一人称导演口吻（“我……”）：{'、'.join(not_first)}")
+    return probs
+
+
+def project_type(brief: dict | None) -> str:
+    t = (brief or {}).get("project_type")
+    return t if t in PROJECT_TYPES else "original"
+
+
+def tone_problems(text: str, ptype: str) -> list[str]:
+    probs = []
+    hits = [t for t in VIOLENCE_CLOSEUP_TERMS if t in text]
+    if hits:
+        probs.append(f"出现禁用的暴力特写（A2，两类项目都禁用）：{'、'.join(hits)}")
+    if ptype == "brand":
+        hits = [t for t in DARK_TONE_TERMS if t in text]
+        if hits:
+            probs.append(f"品牌片不能用暗黑／惊悚／暴力边缘调性（A14，一票否决）：{'、'.join(hits)}")
+    return probs
+
+
+def stance(task: str, ptype: str | None) -> str:
+    lines = ["【Keven 已拍板】"]
+    if ptype == "brand":
+        lines.append("本项目是品牌片：禁止暗黑、惊悚、暴力边缘调性（一票否决）；刀刃抵喉、斩击特写禁用。")
+    elif ptype == "original":
+        lines.append("本项目是自创故事（无品牌）：可以用暗黑、惊悚、黑色幽默，但刀刃抵喉、斩击特写仍禁用。")
+    else:
+        lines.append("品牌片禁止暗黑、惊悚、暴力边缘调性；自创故事可以用；刀刃抵喉、斩击特写两类都禁用。")
+    lines.append("不预设具体品牌；情绪基调和 AI 质感都不设限，服务于故事需求。")
+    lines.append(f"现阶段成功标准是 Keven 的审美判断（过稿与否），变体假设的指标默认写「{DEFAULT_METRIC}」。")
+    if task == "script":
+        lines.append("导演阐述写到段落级，用第一人称导演口吻（“我想……”“我选择……”），不要写逐镜焦段参数表。")
+    return "\n".join(lines)
 
 
 def variants_problems(vs: list | None) -> list[str]:

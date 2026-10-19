@@ -17,6 +17,7 @@ brief：
 - angle 一句话说切入角度，最好能看出这条片的「规则或问题」。
 - visual_anchor 一句话写全片唯一的视觉锚点。
 - why 一句话说为什么能被看完/被转发；cards 写借鉴的灵感卡号。
+- 按 brief 的 project_type 选调性：品牌片不用暗黑/惊悚/暴力边缘骨架，自创故事不限。
 - 适配时长 {{duration}} 秒。
 
 输出：{"ideas":[{"hook":"","angle":"","format":"","skeleton":"S01","visual_anchor":"","why":"","cards":["#01"]}]}

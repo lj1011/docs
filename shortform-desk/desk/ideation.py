@@ -79,8 +79,12 @@ def clean_brief(b: dict) -> dict:
         duration = int(b.get("duration_sec") or 30)
     except ValueError:
         duration = 30
+    brand = str(b.get("brand", "")).strip()
+    ptype = b.get("project_type") if b.get("project_type") in G.PROJECT_TYPES else ("brand" if brand else "original")
     return {
         "topic": topic,
+        "project_type": ptype,
+        "brand": (brand or "待补") if ptype == "brand" else "",
         "audience": str(b.get("audience", "")).strip(),
         "tone": str(b.get("tone", "")).strip(),
         "taboo": str(b.get("taboo", "")).strip(),
@@ -173,7 +177,7 @@ def generate_ideas(pid: str, count: int = 10) -> dict:
         raw = mock.ideas(p["brief"], count, existing, seed=p["rounds"] + len(p["ideas"]))
     else:
         raw = llm.run_prompt("ideas", {"brief": _brief_text(p), "count": str(count), "duration": str(p["brief"]["duration_sec"]),
-                                       "guidelines": G.digest("ideas"), **fb})["ideas"]
+                                       "guidelines": G.digest("ideas", G.project_type(p["brief"])), **fb})["ideas"]
     with _lock:
         p = load(pid)
         _add_ideas(p, raw, "fresh")
@@ -189,7 +193,7 @@ def more_like(pid: str, iid: str, count: int = 3) -> dict:
     if llm.provider()["name"] == "mock":
         raw = mock.more_like(src, count, seed=len(p["ideas"]))
     else:
-        raw = llm.run_prompt("more_like", {"idea": _public(src), "brief": _brief_text(p), "count": str(count), "guidelines": G.digest("ideas"),
+        raw = llm.run_prompt("more_like", {"idea": _public(src), "brief": _brief_text(p), "count": str(count), "guidelines": G.digest("ideas", G.project_type(p["brief"])),
                                            "rejected": fb["rejected"], "existing": fb["existing"]})["ideas"]
     with _lock:
         p = load(pid)
@@ -207,7 +211,7 @@ def remix(pid: str, a: str, b: str, count: int = 2) -> dict:
     if llm.provider()["name"] == "mock":
         raw = mock.remix(ia, ib, count)
     else:
-        raw = llm.run_prompt("remix", {"a": _public(ia), "b": _public(ib), "brief": _brief_text(p), "count": str(count), "guidelines": G.digest("ideas"),
+        raw = llm.run_prompt("remix", {"a": _public(ia), "b": _public(ib), "brief": _brief_text(p), "count": str(count), "guidelines": G.digest("ideas", G.project_type(p["brief"])),
                                        "rejected": _feedback(p)["rejected"]})["ideas"]
     with _lock:
         p = load(pid)
@@ -288,7 +292,7 @@ def generate_outline(pid: str) -> dict:
     if llm.provider()["name"] == "mock":
         beats = mock.outline(idea, p["brief"], variant=len(p["story"]["versions"]))
     else:
-        res = llm.run_prompt("outline", {"idea": _public(idea), "brief": _brief_text(p), "guidelines": G.digest("outline"),
+        res = llm.run_prompt("outline", {"idea": _public(idea), "brief": _brief_text(p), "guidelines": G.digest("outline", G.project_type(p["brief"])),
                                          "duration": str(p["brief"]["duration_sec"])})
         beats, skeleton = res["beats"], str(res.get("skeleton") or skeleton).upper()
     beats = {k: str(beats.get(k, "")).strip() for k, _ in BEATS}
@@ -332,7 +336,7 @@ def generate_script(pid: str) -> dict:
         script = mock.script(base["beats"], idea, p["brief"], G.skeleton(base.get("skeleton", "")))
     else:
         script = llm.run_prompt("script", {"beats": base["beats"], "idea": _public(idea), "brief": _brief_text(p),
-                                           "guidelines": G.digest("script"), "duration": str(dur), "chars": str(int(dur * 4.5))})
+                                           "guidelines": G.digest("script", G.project_type(p["brief"])), "duration": str(dur), "chars": str(int(dur * 4.5))})
     director = _clean_director(script.get("director"))
     variants = _clean_variants(script.get("variants"))
     shots = [{"beat": s.get("beat", ""), "vo": str(s.get("vo", "")).strip(), "screen_text": str(s.get("screen_text", "")).strip(),
@@ -400,9 +404,12 @@ def approve(pid: str) -> dict:
         v = _active(p)
         if not v["script"] or not v["script"]["shots"]:
             raise DeskError("这个版本还没有脚本，不能批准")
-        missing = G.director_missing(v.get("director"))
-        if missing:
-            raise DeskError(f"《创意准则》要求每次故事交付附导演阐述，缺：{'、'.join(missing)}")
+        problems = G.director_problems(v.get("director"))
+        if problems:
+            raise DeskError("《创意准则》要求每次故事交付附导演阐述：" + "；".join(problems))
+        tone = G.tone_problems(_story_text(p, v), G.project_type(p["brief"]))
+        if tone:
+            raise DeskError("；".join(tone) + "。请改稿后再批准。")
         problems = G.variants_problems(v.get("variants"))
         if problems:
             raise DeskError("单变量变体不完整：" + "；".join(problems))
@@ -411,6 +418,7 @@ def approve(pid: str) -> dict:
         out = {"title": v["script"]["title"], "platform": "neutral", "approved": True,
                "source": {"project": pid, "version": v["n"], "idea": _public(_picked(p)), "skeleton": v.get("skeleton", "")},
                "director_statement": v["director"], "variants": v["variants"], "scores": v.get("scores", {}),
+               "project_type": G.project_type(p["brief"]), "brand": p["brief"].get("brand", ""),
                "guidelines": G.meta(),
                "shots": [{"vo": s["vo"], "screen_text": s["screen_text"], "visual": s["visual"]} for s in v["script"]["shots"]]}
         (DATA / pid / "script.json").write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -427,6 +435,17 @@ def unapprove(pid: str) -> dict:
         return save(p)
 
 
+def _story_text(p: dict, v: dict) -> str:
+    idea = _picked(p)
+    parts = [idea.get(k, "") for k in IDEA_FIELDS] + list(v["beats"].values())
+    if v.get("script"):
+        parts.append(v["script"].get("title", ""))
+        for s in v["script"]["shots"]:
+            parts += [s["vo"], s["screen_text"], s["visual"]]
+    parts += list((v.get("director") or {}).values())
+    return "\n".join(parts)
+
+
 def _clean_director(d) -> dict:
     d = d if isinstance(d, dict) else {}
     return {k: str(d.get(k, "")).strip() for k, _ in G.DIRECTOR_FIELDS}
@@ -438,12 +457,13 @@ def _clean_variants(vs) -> list[dict]:
         if isinstance(v, dict):
             row = {k: str(v.get(k, "")).strip() for k, _ in G.VARIANT_FIELDS}
             if any(row.values()):
+                row["metric"] = row["metric"] or G.DEFAULT_METRIC
                 out.append(row)
     return out
 
 
 def score_summary(v: dict) -> dict:
-    """Totals vs the pass lines in 创意准则 §1.4 (proposal; weights pending Keven)."""
+    """Totals vs the pass lines in 创意准则 §1.4 (decided by Keven 2026-10-19). Advisory: does not block approval."""
     g = G.load()
     scores = v.get("scores") or {}
     qs = g["questions"]

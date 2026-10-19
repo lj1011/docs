@@ -11,13 +11,14 @@ let G = { skeletons: [], questions: [], thresholds: {}, director_fields: [], dir
 const skel = (id) => G.skeletons.find((s) => s.id === (id || "").toUpperCase());
 const skelLabel = (id) => { const s = skel(id); return s ? `${s.id} ${s.name}` : id ? `${id}（准则里没有）` : "未标骨架"; };
 function directorMissing(d) { d = d || {}; return G.director_fields.filter(([k]) => G.director_required.includes(k) && !(d[k] || "").trim()).map(([, l]) => l); }
+function directorNotFirstPerson(d) { d = d || {}; return G.director_fields.filter(([k]) => G.director_required.includes(k) && (d[k] || "").trim() && !d[k].includes("我")).map(([, l]) => l); }
 function variantProblems(vs) {
   if (!vs || !vs.length) return ["至少要有 1 个单变量变体"];
   const out = [];
   vs.forEach((v, i) => { const miss = G.variant_fields.filter(([k]) => G.variant_required.includes(k) && !(v[k] || "").trim()).map(([, l]) => l); if (miss.length) out.push(`变体 ${i + 1} 缺：${miss.join("、")}`); });
   return out;
 }
-const deliveryProblems = (v) => { const m = directorMissing(v.director); return [...(m.length ? [`导演阐述缺：${m.join("、")}`] : []), ...variantProblems(v.variants)]; };
+const deliveryProblems = (v) => { const m = directorMissing(v.director), f = directorNotFirstPerson(v.director); return [...(m.length ? [`导演阐述缺：${m.join("、")}`] : []), ...(f.length ? [`导演阐述要用第一人称「我…」：${f.join("、")}`] : []), ...variantProblems(v.variants)]; };
 
 async function api(method, url, body) {
   const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -82,6 +83,8 @@ const stepName = (s) => (STEPS.find((x) => x[0] === s) || [, s])[1];
 function briefForm(b) {
   const refs = [0, 1, 2].map((i) => `<input id="ref${i}" placeholder="参考 ${i + 1}：链接或一句备注（可空）" value="${esc((b.refs || [])[i] || "")}" style="margin-bottom:8px">`).join("");
   return `<div class="card">
+    <div class="row"><div style="width:180px"><label>项目类型</label><select id="ptype"><option value="original"${b.project_type === "brand" ? "" : " selected"}>自创故事</option><option value="brand"${b.project_type === "brand" ? " selected" : ""}>品牌片</option></select></div>
+      <div class="grow"><label>品牌 <small>品牌片才填；品牌片不用暗黑/惊悚/暴力边缘调性</small></label><input id="brand" value="${esc(b.brand)}" placeholder="例：任意指定品牌（自创故事留空）"></div></div>
     <label>产品 / 主题 <small>必填</small></label><input id="topic" value="${esc(b.topic)}" placeholder="例：早上不赖床 / 某款保温杯 / 新手理财第一课">
     <div class="row"><div class="grow"><label>目标受众</label><input id="audience" value="${esc(b.audience)}" placeholder="例：25-35 岁上班族"></div>
       <div class="grow"><label>语气</label><input id="tone" value="${esc(b.tone)}" placeholder="例：轻松、像朋友聊天"></div></div>
@@ -93,6 +96,7 @@ function briefForm(b) {
 
 function readBrief() {
   return {
+    project_type: $("#ptype").value, brand: $("#brand").value,
     topic: $("#topic").value, audience: $("#audience").value, tone: $("#tone").value, taboo: $("#taboo").value,
     duration_sec: $("#duration").value, refs: [0, 1, 2].map((i) => $(`#ref${i}`).value),
   };
@@ -249,7 +253,7 @@ function viewStory() {
 function directorEditor(v) {
   const d = v.director || {};
   const miss = directorMissing(d);
-  return `<div class="section"><h2>导演阐述 <span class="hint">《创意准则》要求每次故事交付必附${miss.length ? ` · <span class="reason">缺：${esc(miss.join("、"))}</span>` : " · ✓ 完整"}</span></h2>
+  return `<div class="section"><h2>导演阐述 <span class="hint">《创意准则》要求每次故事交付必附 · 第一人称、段落级${miss.length ? ` · <span class="reason">缺：${esc(miss.join("、"))}</span>` : " · ✓ 完整"}</span></h2>
     <div class="card director">${G.director_fields.map(([k, l]) => `<label>${esc(l)}${G.director_required.includes(k) ? " <small>必填</small>" : ""}</label>
       <textarea data-dir="${k}" rows="2" onchange="saveDirector()">${esc(d[k] || "")}</textarea>`).join("")}</div></div>`;
 }
@@ -270,7 +274,7 @@ function scorePanel(v) {
   const th = G.thresholds || {};
   const line = (dim, label) => { const qs = G.questions.filter((q) => q.dim === dim); return `<h4>${label}</h4>${qs.map((q) => `<div class="qrow"><span class="qid">${q.id}</span><span class="grow">${esc(q.text.replace(/\*\*/g, ""))}</span>
       ${[0, 1, 2].map((n) => `<button class="score ${sc[q.id] === n ? "on" : ""}" title="${esc(q.levels[n])}" onclick="setScore('${q.id}',${n})">${n}</button>`).join("")}</div>`).join("")}`; };
-  return `<div class="section"><h2>按准则打分 <span class="hint">可选；权重和及格线是 v0.1 提议，待 Keven 拍板</span></h2><div class="card">
+  return `<div class="section"><h2>按准则打分 <span class="hint">可选；权重和及格线已由 Keven 拍板（v0.2）</span></h2><div class="card">
     <div class="row"><b>叙事 ${sum.narrative ?? 0}/${(th.narrative || [, 12])[1]}</b><b>视觉 ${sum.visual ?? 0}/${(th.visual || [, 14])[1]}</b><b>合计 ${sum.total ?? 0}/${(th.total || [, 26])[1]}</b>
       <span class="hint">及格线：叙事 ≥${(th.narrative || ["?"])[0]}、视觉 ≥${(th.visual || ["?"])[0]}、合计 ≥${(th.total || ["?"])[0]}，N1 和 V1 ≥1 · 已答 ${sum.answered ?? 0}/${G.questions.length}</span>
       <span class="tag ${sum.passed ? "pick" : ""}">${sum.passed ? "过线" : "未过线"}</span></div>
@@ -284,7 +288,7 @@ async function saveDirector() {
 }
 function readVariants() { return [...document.querySelectorAll("tr[data-var]")].map((tr) => { const o = {}; tr.querySelectorAll("[data-vk]").forEach((el) => (o[el.dataset.vk] = el.value)); return o; }); }
 async function saveVariants(list) { await api("PUT", `/api/projects/${pid()}/story`, { variants: list || readVariants() }); await reload(); toast("已保存"); }
-const addVariant = () => saveVariants([...readVariants(), { variable: "", change: "", hypothesis: "", falsify: "", metric: "待补" }]);
+const addVariant = () => saveVariants([...readVariants(), { variable: "", change: "", hypothesis: "", falsify: "", metric: G.default_metric || "Keven 审美判断（过稿与否）" }]);
 const delVariant = (i) => saveVariants(readVariants().filter((_, j) => j !== i));
 async function setScore(q, n) { const scores = { ...(activeVersion().scores || {}), [q]: n }; await api("PUT", `/api/projects/${pid()}/story`, { scores }); await reload(); }
 

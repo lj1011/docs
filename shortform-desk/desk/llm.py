@@ -20,7 +20,7 @@ def generate_ideas(brief: dict) -> dict:
         "你是短视频创意编导。输出 JSON：{\"ideas\":[{\"hook\",\"angle\",\"format\",\"why\"}]}，恰好 10 条。"
         "format 取值：口播/对比/清单/反转/演示。hook 是前 3 秒的一句话。"
         f"目标时长 {p.min_sec}-{p.max_sec} 秒，竖屏。避开 brief 里的禁区。"
-        "每条加 skeleton（故事骨架编号）和 visual_anchor（唯一视觉锚点）。\n\n" + digest("ideas")
+        "每条加 skeleton（故事骨架编号）和 visual_anchor（唯一视觉锚点）。\n\n" + digest("ideas", brief.get("project_type"))
     )
     data = _chat_json(system, json.dumps(brief, ensure_ascii=False))
     data["brief"] = brief
@@ -44,7 +44,8 @@ def draft_script(ideas: dict, pick: int) -> dict:
             "vo 是可朗读的口播；screen_text 是画面大字，不超过 10 字；visual 描述画面（用于生成图片）。"
             "第一镜是钩子，最后一镜是 CTA。"
             "另附 director（intent/anchor/camera_light_rhythm/hypothesis/borrowed/unknowns）"
-            "和 variants（每个只改一个变量：variable/change/hypothesis/falsify/metric）。\n\n" + digest("script")
+            "和 variants（每个只改一个变量：variable/change/hypothesis/falsify/metric）。"
+            "director 用第一人称导演口吻、段落级。\n\n" + digest("script", (brief or {}).get("project_type"))
         )
         script = _chat_json(system, json.dumps({"brief": brief, "idea": chosen}, ensure_ascii=False))
         script["platform"] = brief.get("platform")

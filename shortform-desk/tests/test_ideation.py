@@ -79,7 +79,7 @@ class IdeationFlow(unittest.TestCase):
         self.assertEqual(script["source"]["idea"]["hook"], "我改过的钩子")
         self.assertTrue(script["director_statement"]["intent"])
         self.assertTrue(script["variants"][0]["falsify"])
-        self.assertEqual(script["guidelines"]["version"], "v0.1")
+        self.assertEqual(script["guidelines"]["version"], "v0.2")
         p = ide.edit_version(self.pid, {"beats": {"cta": "新的结尾"}})
         self.assertIsNone(p["story"]["approved"])
 
@@ -95,7 +95,7 @@ class IdeationFlow(unittest.TestCase):
             self.assertIsNotNone(G.skeleton(i["skeleton"]), i["skeleton"])
             self.assertTrue(i["visual_anchor"])
             self.assertTrue(all(c.startswith("#") for c in i["cards"]))
-        self.assertEqual(p["guidelines"]["version"], "v0.1")
+        self.assertEqual(p["guidelines"]["version"], "v0.2")
 
     def test_approve_requires_director_statement(self):
         self._scripted()
@@ -113,6 +113,57 @@ class IdeationFlow(unittest.TestCase):
             ide.approve(self.pid)
         ide.edit_version(self.pid, {"variants": [{"variable": "停格有无", "change": "有→无", "hypothesis": "h", "falsify": "f"}]})
         self.assertTrue(ide.approve(self.pid)["story"]["approved"])
+
+    def test_approve_requires_first_person_director(self):
+        self._scripted()
+        ide.edit_version(self.pid, {"director": {"intent": "让观众相信早起不难", "anchor": "我选闹钟",
+                                                 "camera_light_rhythm": "我用冷光", "hypothesis": "我赌停格"}})
+        with self.assertRaisesRegex(ide.DeskError, "第一人称"):
+            ide.approve(self.pid)
+
+    def test_brief_project_type(self):
+        self.assertEqual(self.p["brief"]["project_type"], "original")
+        self.assertEqual(self.p["brief"]["brand"], "")
+        b = ide.create_project({"topic": "t", "brand": "某品牌"})["brief"]
+        self.assertEqual((b["project_type"], b["brand"]), ("brand", "某品牌"))
+        b = ide.create_project({"topic": "t", "project_type": "brand"})["brief"]
+        self.assertEqual(b["brand"], "待补")
+
+    def test_variant_metric_defaults_to_keven_judgment(self):
+        self._scripted()
+        p = ide.edit_version(self.pid, {"variants": [{"variable": "停格有无", "change": "有→无", "hypothesis": "h", "falsify": "f"}]})
+        self.assertEqual(ide._active(p)["variants"][0]["metric"], G.DEFAULT_METRIC)
+
+    def _dark(self, pid):
+        ide.edit_version(pid, {"beats": {"turn": "一场惊悚的打斗"}})
+
+    def test_brand_film_vetoes_dark_tone(self):
+        pid = ide.create_project({**BRIEF, "brand": "某品牌"})["id"]
+        p = ide.generate_ideas(pid)
+        ide.idea_action(pid, p["ideas"][0]["id"], "pick", {})
+        ide.generate_outline(pid)
+        ide.generate_script(pid)
+        self._dark(pid)
+        with self.assertRaisesRegex(ide.DeskError, "品牌片"):
+            ide.approve(pid)
+
+    def test_original_story_allows_dark_but_not_blade_closeup(self):
+        self._scripted()
+        self._dark(self.pid)
+        self.assertTrue(ide.approve(self.pid)["story"]["approved"])
+        ide.edit_version(self.pid, {"beats": {"payoff": "刀刃抵喉的特写"}})
+        with self.assertRaisesRegex(ide.DeskError, "A2"):
+            ide.approve(self.pid)
+
+    def test_brand_film_mock_flow_passes(self):
+        pid = ide.create_project({**BRIEF, "brand": "某品牌"})["id"]
+        p = ide.generate_ideas(pid)
+        ide.idea_action(pid, p["ideas"][0]["id"], "pick", {})
+        ide.generate_outline(pid)
+        ide.generate_script(pid)
+        self.assertTrue(ide.approve(pid)["story"]["approved"])
+        script = json.loads(ide.script_path(pid).read_text(encoding="utf-8"))
+        self.assertEqual((script["project_type"], script["brand"]), ("brand", "某品牌"))
 
     def test_scores_against_pass_lines(self):
         p = self._scripted()
@@ -145,13 +196,13 @@ class Guidelines(unittest.TestCase):
 
     def test_file_parsed(self):
         self.assertTrue(self.g["exists"])
-        self.assertEqual(self.g["version"], "v0.1")
+        self.assertEqual(self.g["version"], "v0.2")
         self.assertGreaterEqual(len(self.g["skeletons"]), 10)
         self.assertEqual({q["dim"] for q in self.g["questions"]}, {"narrative", "visual"})
         self.assertEqual(self.g["thresholds"]["total"], [16, 26])
 
     def test_required_sections_present(self):
-        for title in ["零、", "一、好点子的判断标准", "二、故事骨架库", "三、视觉手法库", "四、方法论", "五、反模式", "六、人机配合方式", "七、待 Keven 拍板的开放问题"]:
+        for title in ["零、", "一、好点子的判断标准", "二、故事骨架库", "三、视觉手法库", "四、方法论", "五、反模式", "六、人机配合方式", "七、Keven 拍板记录与开放问题"]:
             self.assertIn("## " + title, self.text)
 
     def test_every_skeleton_and_commonality_cites_cards(self):
@@ -166,10 +217,16 @@ class Guidelines(unittest.TestCase):
         cited = set(re.findall(r"#(\d\d)", self.g["sections"]["零"]))
         self.assertEqual(cited, {f"{i:02d}" for i in range(1, 24)})
 
-    def test_open_questions_count(self):
+    def test_keven_decisions_recorded(self):
         import re
-        n = len(re.findall(r"^\d+\. ", self.g["sections"]["七"], re.M))
-        self.assertTrue(5 <= n <= 8, n)
+        sec = self.g["sections"]["七"]
+        self.assertIn("### 7.1 已由 Keven 拍板（2026-10-19）", sec)
+        self.assertIn("### 7.2", sec)
+        decided = sec.split("### 7.2")[0]
+        self.assertEqual(len(re.findall(r"^\d+\. ", decided, re.M)), 8)
+        self.assertIn("| v0.2 | 2026-10-19", self.g["sections"]["六"])
+        self.assertEqual(self.g["thresholds"]["narrative"], [7, 12])
+        self.assertEqual(self.g["thresholds"]["visual"], [8, 14])
 
     def test_digests_injected(self):
         self.assertIn("S07", G.digest("ideas"))
@@ -179,6 +236,10 @@ class Guidelines(unittest.TestCase):
         self.assertIn("【导演阐述】", script)
         self.assertIn("视觉手法库", script)
         self.assertIn("单变量", script)
+        self.assertIn("第一人称", script)
+        self.assertIn("品牌片：禁止暗黑", G.digest("ideas", "brand"))
+        self.assertIn("自创故事（无品牌）：可以用暗黑", G.digest("ideas", "original"))
+        self.assertIn(G.DEFAULT_METRIC, G.digest("outline"))
 
     def test_prompts_receive_guidelines(self):
         seen = []
@@ -191,7 +252,7 @@ class Guidelines(unittest.TestCase):
                 return {"skeleton": "S07", "beats": {"hook": "h", "turn": "t", "payoff": "p", "cta": "c"}}
             if "镜头表" in user:
                 return {"title": "t", "shots": [{"beat": "hook", "vo": "一句", "screen_text": "", "visual": ""}],
-                        "director": {"intent": "i", "anchor": "a", "camera_light_rhythm": "c", "hypothesis": "h"},
+                        "director": {"intent": "我想要i", "anchor": "我选a", "camera_light_rhythm": "我用c", "hypothesis": "我赌h"},
                         "variants": [{"variable": "停格有无", "change": "有→无", "hypothesis": "h", "falsify": "f"}]}
             return {"ideas": [{"hook": "钩子", "angle": "a", "format": "口播", "skeleton": "s07", "visual_anchor": "红鸟", "why": "w", "cards": ["8", "#01"]}]}
         llm.chat_json = fake
@@ -205,7 +266,7 @@ class Guidelines(unittest.TestCase):
             p = ide.generate_script(p["id"])
             v = ide._active(p)
             self.assertEqual(v["skeleton"], "S07")
-            self.assertEqual(v["director"]["intent"], "i")
+            self.assertEqual(v["director"]["intent"], "我想要i")
             self.assertTrue(ide.approve(p["id"])["story"]["approved"])
         finally:
             llm.provider, llm.chat_json = orig_provider, orig_chat
