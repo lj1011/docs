@@ -1,35 +1,18 @@
-"""Ideas + script drafting. Uses OpenAI if OPENAI_API_KEY is set, else returns the bundled samples."""
+"""CLI ideas + script drafting via the pluggable provider; bundled samples when no key. The web desk uses ideation.py."""
 
 import json
-import os
-import urllib.request
 from pathlib import Path
 
+from .llm_providers import chat_json as _chat_json
+from .llm_providers import provider
 from .platforms import get_platform
 
 SAMPLES = Path(__file__).resolve().parent.parent / "samples"
 
 
-def _chat_json(system: str, user: str) -> dict:
-    body = json.dumps(
-        {
-            "model": os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
-            "response_format": {"type": "json_object"},
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        }
-    ).encode()
-    req = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
-        data=body,
-        headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}", "Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return json.loads(json.loads(r.read())["choices"][0]["message"]["content"])
-
-
 def generate_ideas(brief: dict) -> dict:
-    if not os.environ.get("OPENAI_API_KEY"):
-        print("! no OPENAI_API_KEY: returning bundled sample ideas")
+    if provider()["name"] == "mock":
+        print("! no LLM key (mock): returning bundled sample ideas")
         return json.loads((SAMPLES / "ideas.json").read_text(encoding="utf-8"))
     p = get_platform(brief.get("platform"))
     system = (
@@ -47,8 +30,8 @@ def draft_script(ideas: dict, pick: int) -> dict:
     if not 1 <= pick <= len(items):
         raise SystemExit(f"--pick must be 1..{len(items)}")
     chosen = items[pick - 1]
-    if not os.environ.get("OPENAI_API_KEY"):
-        print("! no OPENAI_API_KEY: returning bundled sample script (edit it before approving)")
+    if provider()["name"] == "mock":
+        print("! no LLM key (mock): returning bundled sample script (edit it before approving)")
         script = json.loads((SAMPLES / "script.json").read_text(encoding="utf-8"))
     else:
         brief = ideas.get("brief", {})

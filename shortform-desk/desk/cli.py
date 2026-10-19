@@ -36,6 +36,10 @@ def main(argv=None) -> None:
 
     sub.add_parser("platforms", help="list format packs")
 
+    s = sub.add_parser("serve", help="local web desk: brief -> ideas -> story -> approve")
+    s.add_argument("--host", default="127.0.0.1")
+    s.add_argument("--port", type=int, default=8787)
+
     args = ap.parse_args(argv)
     if args.cmd == "ideas":
         from .llm import generate_ideas
@@ -64,6 +68,10 @@ def main(argv=None) -> None:
         report = render(script, Path(args.out), platform_id=args.platform, tts_name=args.tts,
                         visual_name=args.visual, bgm=args.bgm)
         print(json.dumps(report, ensure_ascii=False, indent=2))
+    elif args.cmd == "serve":
+        from .server import serve
+
+        serve(args.host, args.port)
     elif args.cmd == "platforms":
         for p in PLATFORMS.values():
             print(f"{p.id:9s} {p.label:18s} {p.width}x{p.height} {p.min_sec:g}-{p.max_sec:g}s  caption<={p.max_caption_chars}")
