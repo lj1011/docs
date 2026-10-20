@@ -107,7 +107,7 @@ def load() -> dict:
     else:
         text = PATH.read_text(encoding="utf-8")
         secs = _sections(text)
-        vm = re.search(r"v\d+\.\d+", text.splitlines()[0] if text else "")
+        vm = re.search(r"v\d+\.\d+(?:\.\d+)?", text.splitlines()[0] if text else "")
         data = {
             "path": str(PATH),
             "exists": True,

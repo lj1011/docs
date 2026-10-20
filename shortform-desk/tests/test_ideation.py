@@ -79,7 +79,7 @@ class IdeationFlow(unittest.TestCase):
         self.assertEqual(script["source"]["idea"]["hook"], "我改过的钩子")
         self.assertTrue(script["director_statement"]["intent"])
         self.assertTrue(script["variants"][0]["falsify"])
-        self.assertEqual(script["guidelines"]["version"], "v0.3")
+        self.assertEqual(script["guidelines"]["version"], "v0.3.1")
         p = ide.edit_version(self.pid, {"beats": {"cta": "新的结尾"}})
         self.assertIsNone(p["story"]["approved"])
 
@@ -95,7 +95,7 @@ class IdeationFlow(unittest.TestCase):
             self.assertIsNotNone(G.skeleton(i["skeleton"]), i["skeleton"])
             self.assertTrue(i["visual_anchor"])
             self.assertTrue(all(c.startswith("#") for c in i["cards"]))
-        self.assertEqual(p["guidelines"]["version"], "v0.3")
+        self.assertEqual(p["guidelines"]["version"], "v0.3.1")
 
     def test_approve_requires_director_statement(self):
         self._scripted()
@@ -196,7 +196,7 @@ class Guidelines(unittest.TestCase):
 
     def test_file_parsed(self):
         self.assertTrue(self.g["exists"])
-        self.assertEqual(self.g["version"], "v0.3")
+        self.assertEqual(self.g["version"], "v0.3.1")
         self.assertGreaterEqual(len(self.g["skeletons"]), 10)
         self.assertEqual({q["dim"] for q in self.g["questions"]}, {"narrative", "visual"})
         self.assertEqual(self.g["thresholds"]["total"], [16, 26])
