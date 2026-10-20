@@ -79,7 +79,7 @@ class IdeationFlow(unittest.TestCase):
         self.assertEqual(script["source"]["idea"]["hook"], "我改过的钩子")
         self.assertTrue(script["director_statement"]["intent"])
         self.assertTrue(script["variants"][0]["falsify"])
-        self.assertEqual(script["guidelines"]["version"], "v0.2")
+        self.assertEqual(script["guidelines"]["version"], "v0.3")
         p = ide.edit_version(self.pid, {"beats": {"cta": "新的结尾"}})
         self.assertIsNone(p["story"]["approved"])
 
@@ -95,7 +95,7 @@ class IdeationFlow(unittest.TestCase):
             self.assertIsNotNone(G.skeleton(i["skeleton"]), i["skeleton"])
             self.assertTrue(i["visual_anchor"])
             self.assertTrue(all(c.startswith("#") for c in i["cards"]))
-        self.assertEqual(p["guidelines"]["version"], "v0.2")
+        self.assertEqual(p["guidelines"]["version"], "v0.3")
 
     def test_approve_requires_director_statement(self):
         self._scripted()
@@ -196,26 +196,26 @@ class Guidelines(unittest.TestCase):
 
     def test_file_parsed(self):
         self.assertTrue(self.g["exists"])
-        self.assertEqual(self.g["version"], "v0.2")
+        self.assertEqual(self.g["version"], "v0.3")
         self.assertGreaterEqual(len(self.g["skeletons"]), 10)
         self.assertEqual({q["dim"] for q in self.g["questions"]}, {"narrative", "visual"})
         self.assertEqual(self.g["thresholds"]["total"], [16, 26])
 
     def test_required_sections_present(self):
-        for title in ["零、", "一、好点子的判断标准", "二、故事骨架库", "三、视觉手法库", "四、方法论", "五、反模式", "六、人机配合方式", "七、Keven 拍板记录与开放问题"]:
+        for title in ["零、", "一、好点子的判断标准", "二、故事骨架库", "三、视觉手法库", "四、方法论", "五、反模式", "六、人机配合方式", "七、Keven 拍板记录与开放问题", "八、灵感信号储备"]:
             self.assertIn("## " + title, self.text)
 
     def test_every_skeleton_and_commonality_cites_cards(self):
         import re
         for sk in self.g["skeletons"]:
             self.assertTrue(sk["cards"], sk["id"])
-            self.assertTrue(all(1 <= int(c) <= 23 for c in sk["cards"]))
+            self.assertTrue(all(1 <= int(c) <= 25 for c in sk["cards"]))
         rows = [l for l in self.g["sections"]["零"].splitlines() if re.match(r"^\| C\d+", l)]
         self.assertGreaterEqual(len(rows), 10)
         for r in rows:
             self.assertTrue(re.search(r"#\d\d", r), r)
         cited = set(re.findall(r"#(\d\d)", self.g["sections"]["零"]))
-        self.assertEqual(cited, {f"{i:02d}" for i in range(1, 24)})
+        self.assertEqual(cited, {f"{i:02d}" for i in range(1, 26)})
 
     def test_keven_decisions_recorded(self):
         import re
@@ -227,6 +227,19 @@ class Guidelines(unittest.TestCase):
         self.assertIn("| v0.2 | 2026-10-19", self.g["sections"]["六"])
         self.assertEqual(self.g["thresholds"]["narrative"], [7, 12])
         self.assertEqual(self.g["thresholds"]["visual"], [8, 14])
+
+    def test_v03_cards_and_signals_absorbed(self):
+        s18, s19 = G.skeleton("S18"), G.skeleton("S19")
+        self.assertIn("25", s18["cards"])
+        self.assertIn("0.5–2.5 秒", s18["mechanism"])
+        self.assertEqual(s19["cards"], ["24"])
+        self.assertIn("### 3.9 多镜 AI 一致性", self.g["sections"]["三"])
+        self.assertIn("午夜样板间", self.g["sections"]["五"])
+        self.assertIn("| v0.3 | 2026-10-20", self.g["sections"]["六"])
+        sig = G.digest("ideas")
+        self.assertIn("RÆBURN", sig)
+        self.assertIn("Taali Twirlz", sig)
+        self.assertNotIn("**", sig.split("【灵感信号")[1])
 
     def test_digests_injected(self):
         self.assertIn("S07", G.digest("ideas"))

@@ -2,7 +2,7 @@
 
 The markdown is the source of truth and is edited by humans, so parsing is tolerant: missing parts
 degrade to empty lists instead of failing. Conventions relied on:
-  ## 零、 / ## 一、 ... section headings
+  ## 零、 / ## 一、 ... ## 八、 section headings (八 = 灵感信号储备 table rows "| YYYY-MM-DD | 信号 | 机制 | ...")
   ### Sxx · 名称            skeletons, with "- **核心机制**：" / "- **戏剧节拍**：" / "- **卡片**：" bullets
   | N1 | 问题 | ... |       scoring questions (N = 叙事/策略, V = 视觉)
   叙事 ≥ 7/12 / 视觉 ≥ 8/14 / 合计 ≥ 16/26   pass lines
@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 
 PATH = Path(os.environ.get("DESK_GUIDELINES", Path(__file__).resolve().parent.parent / "guidelines" / "创意准则.md"))
-SECTION_KEYS = ["零", "一", "二", "三", "四", "五", "六", "七"]
+SECTION_KEYS = ["零", "一", "二", "三", "四", "五", "六", "七", "八"]
 DIRECTOR_FIELDS = [
     ("intent", "立意"),
     ("anchor", "视觉锚点"),
@@ -160,6 +160,10 @@ def digest(task: str, ptype: str | None = None, limit: int = 6500) -> str:
         parts.append("【故事骨架库：点子要标骨架编号】\n" + "\n".join(f"{s['id']} {s['name']}：{_strip_cards(s['mechanism'])}" for s in sk))
         anti = [l for l in secs.get("五", "").splitlines() if re.match(r"^\| A\d+ \|", l)]
         parts.append("【反模式：不要出】\n" + "\n".join(re.sub(r"^\| (A\d+) \| \*\*(.+?)\*\* \|.*$", r"\1 \2", l) for l in anti))
+        sig = [l.split(" | ") for l in secs.get("八", "").splitlines() if re.match(r"^\| \d{4}-\d\d-\d\d \|", l)]
+        if sig:
+            parts.append("【灵感信号（待验证，可作候选方向，不算卡片证据）】\n"
+                         + "\n".join(f"{c[1].replace('**', '').strip()}：{c[2].replace('**', '')}" for c in sig if len(c) >= 3))
     if task == "outline":
         parts.append("【故事骨架库：大纲要沿用所选骨架的节拍】\n" + "\n".join(f"{s['id']} {s['name']}：{s['beats']}" for s in sk))
     if task == "script":
