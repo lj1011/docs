@@ -1,0 +1,8 @@
+{
+  "platform": "neutral",
+  "account": "通用知识口播号",
+  "brief": "给上班族讲怎么早上不赖床，轻松、实用、30 秒内讲完",
+  "refs": [],
+  "avoid": ["医疗建议", "夸大功效"],
+  "duration_sec": 30
+}
